@@ -140,6 +140,10 @@ func (s *Service) Withdraw(ctx context.Context, amount *big.Int) (hash common.Ha
 	return s.chequebookWithdrawFunc(ctx, amount)
 }
 
+func (s *Service) Txs() ([]string, error) {
+	return nil, nil
+}
+
 // Option is the option passed to the mock Chequebook service
 type Option interface {
 	apply(*Service)

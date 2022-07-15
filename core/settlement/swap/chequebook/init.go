@@ -3,12 +3,13 @@ package chequebook
 import (
 	"context"
 	"crypto/rand"
-	"fmt"
+	"errors"
 	"math/big"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/redesblock/hop/core/logging"
+	"github.com/redesblock/hop/core/sctx"
 	"github.com/redesblock/hop/core/settlement/swap/erc20"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/transaction"
@@ -20,6 +21,11 @@ const (
 
 	balanceCheckBackoffDuration = 20 * time.Second
 	balanceCheckMaxRetries      = 10
+)
+
+const (
+	erc20SmallUnitStr = "10000000000000000"
+	ethSmallUnitStr   = "1000000000000000000"
 )
 
 func checkBalance(
@@ -44,9 +50,13 @@ func checkBalance(
 			return err
 		}
 
-		gasPrice, err := swapBackend.SuggestGasPrice(timeoutCtx)
-		if err != nil {
-			return err
+		gasPrice := sctx.GetGasPrice(ctx)
+
+		if gasPrice == nil {
+			gasPrice, err = swapBackend.SuggestGasPrice(timeoutCtx)
+			if err != nil {
+				return err
+			}
 		}
 
 		minimumEth := gasPrice.Mul(gasPrice, big.NewInt(250000))
@@ -54,28 +64,36 @@ func checkBalance(
 		insufficientERC20 := erc20Balance.Cmp(swapInitialDeposit) < 0
 		insufficientETH := ethBalance.Cmp(minimumEth) < 0
 
+		erc20SmallUnit, ethSmallUnit := new(big.Int), new(big.Float)
+		erc20SmallUnit.SetString(erc20SmallUnitStr, 10)
+		ethSmallUnit.SetString(ethSmallUnitStr)
+
 		if insufficientERC20 || insufficientETH {
-			neededERC20, mod := new(big.Int).DivMod(swapInitialDeposit, big.NewInt(10000000000000000), new(big.Int))
+			neededERC20, mod := new(big.Int).DivMod(swapInitialDeposit, erc20SmallUnit, new(big.Int))
 			if mod.Cmp(big.NewInt(0)) > 0 {
 				// always round up the division as the hopaar cannot handle decimals
 				neededERC20.Add(neededERC20, big.NewInt(1))
 			}
 
-			if insufficientETH && insufficientERC20 {
-				logger.Warningf("cannot continue until there is sufficient BNB (for Gas) and at least %d MOP available on %x", neededERC20, overlayEthAddress)
-			} else if insufficientETH {
-				logger.Warningf("cannot continue until there is sufficient BNB (for Gas) available on %x", overlayEthAddress)
-			} else {
-				logger.Warningf("cannot continue until there is at least %d MOP available on %x", neededERC20, overlayEthAddress)
-			}
+			neededETH := new(big.Float).Quo(new(big.Float).SetInt(minimumEth), ethSmallUnit)
 
+			if insufficientETH && insufficientERC20 {
+				logger.Warningf("cannot continue until there is at least %f xDAI (for Gas) and at least %d HOP bridged on the xDAI network available on %x", neededETH, neededERC20, overlayEthAddress)
+			} else if insufficientETH {
+				logger.Warningf("cannot continue until there is at least %f xDAI (for Gas) available on %x", neededETH, overlayEthAddress)
+			} else {
+				logger.Warningf("cannot continue until there is at least %d HOP available on %x", neededERC20, overlayEthAddress)
+			}
+			if chainId == 5 {
+				logger.Warningf("learn how to fund your node by visiting our docs at https://docs.ethswarm.org/docs/installation/fund-your-node")
+			}
 			select {
 			case <-time.After(balanceCheckBackoffDuration):
 			case <-timeoutCtx.Done():
 				if insufficientERC20 {
-					return fmt.Errorf("insufficient HOP for initial deposit")
+					return errors.New("insufficient HOP for initial deposit")
 				} else {
-					return fmt.Errorf("insufficient ETH for initial deposit")
+					return errors.New("insufficient ETH for initial deposit")
 				}
 			}
 			continue
@@ -97,19 +115,13 @@ func Init(
 	chainId int64,
 	overlayEthAddress common.Address,
 	chequeSigner ChequeSigner,
+	erc20Service erc20.Service,
 ) (chequebookService Service, err error) {
 	// verify that the supplied factory is valid
 	err = chequebookFactory.VerifyBytecode(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	erc20Address, err := chequebookFactory.ERC20Address(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	erc20Service := erc20.New(swapBackend, transactionService, erc20Address)
 
 	var chequebookAddress common.Address
 	err = stateStore.Get(chequebookKey, &chequebookAddress)

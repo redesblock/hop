@@ -7,13 +7,15 @@ import (
 	"fmt"
 	"github.com/redesblock/hop/cmd/version"
 	"net"
+	"os"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/hashicorp/go-multierror"
 	"github.com/libp2p/go-libp2p"
-	autonat "github.com/libp2p/go-libp2p-autonat"
 	crypto "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/host"
@@ -22,7 +24,8 @@ import (
 	"github.com/libp2p/go-libp2p-core/peerstore"
 	protocol "github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-peerstore/pstoremem"
-	tptu "github.com/libp2p/go-libp2p-transport-upgrader"
+	lp2pswarm "github.com/libp2p/go-libp2p-swarm"
+	autonat "github.com/libp2p/go-libp2p/p2p/host/autonat"
 	basichost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	libp2pping "github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	"github.com/libp2p/go-tcp-transport"
@@ -43,6 +46,7 @@ import (
 	"github.com/redesblock/hop/core/topology"
 	"github.com/redesblock/hop/core/topology/lightnode"
 	"github.com/redesblock/hop/core/tracing"
+	"go.uber.org/atomic"
 )
 
 var (
@@ -84,6 +88,7 @@ type Service struct {
 	lightNodeLimit    int
 	protocolsmu       sync.RWMutex
 	reacher           p2p.Reacher
+	networkStatus     atomic.Int32
 }
 
 type lightnodes interface {
@@ -95,17 +100,18 @@ type lightnodes interface {
 }
 
 type Options struct {
-	PrivateKey     *ecdsa.PrivateKey
-	NATAddr        string
-	EnableWS       bool
-	FullNode       bool
-	LightNodeLimit int
-	WelcomeMessage string
-	Transaction    []byte
-	hostFactory    func(context.Context, ...libp2p.Option) (host.Host, error)
+	PrivateKey      *ecdsa.PrivateKey
+	NATAddr         string
+	EnableWS        bool
+	FullNode        bool
+	LightNodeLimit  int
+	WelcomeMessage  string
+	Transaction     []byte
+	ValidateOverlay bool
+	hostFactory     func(...libp2p.Option) (host.Host, error)
 }
 
-func New(ctx context.Context, signer hopCrypto.Signer, networkID uint64, overlay swarm.Address, addr string, ab addressbook.Putter, storer storage.StateStorer, lightNodes *lightnode.Container, swapBackend handshake.SenderMatcher, logger logging.Logger, tracer *tracing.Tracer, o Options) (*Service, error) {
+func New(ctx context.Context, signer hopCrypto.Signer, networkID uint64, overlay swarm.Address, addr string, ab addressbook.Putter, storer storage.StateStorer, lightNodes *lightnode.Container, swapBackend p2p.SenderMatcher, logger logging.Logger, tracer *tracing.Tracer, o Options) (*Service, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, fmt.Errorf("address: %w", err)
@@ -141,7 +147,10 @@ func New(ctx context.Context, signer hopCrypto.Signer, networkID uint64, overlay
 	}
 
 	security := libp2p.DefaultSecurity
-	libp2pPeerstore := pstoremem.NewPeerstore()
+	libp2pPeerstore, err := pstoremem.NewPeerstore()
+	if err != nil {
+		return nil, err
+	}
 
 	var natManager basichost.NATManager
 
@@ -169,11 +178,7 @@ func New(ctx context.Context, signer hopCrypto.Signer, networkID uint64, overlay
 	}
 
 	transports := []libp2p.Option{
-		libp2p.Transport(func(u *tptu.Upgrader) *tcp.TcpTransport {
-			t := tcp.NewTCPTransport(u)
-			t.DisableReuseport = true
-			return t
-		}),
+		libp2p.Transport(tcp.NewTCPTransport, tcp.DisableReuseport()),
 	}
 
 	if o.EnableWS {
@@ -187,14 +192,14 @@ func New(ctx context.Context, signer hopCrypto.Signer, networkID uint64, overlay
 		o.hostFactory = libp2p.New
 	}
 
-	h, err := o.hostFactory(ctx, opts...)
+	h, err := o.hostFactory(opts...)
 	if err != nil {
 		return nil, err
 	}
 
 	// Support same non default security and transport options as
 	// original host.
-	dialer, err := o.hostFactory(ctx, append(transports, security)...)
+	dialer, err := o.hostFactory(append(transports, security)...)
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +217,7 @@ func New(ctx context.Context, signer hopCrypto.Signer, networkID uint64, overlay
 	// If you want to help other peers to figure out if they are behind
 	// NATs, you can launch the server-side of AutoNAT too (AutoRelay
 	// already runs the client)
-	if _, err = autonat.New(ctx, h, options...); err != nil {
+	if _, err = autonat.New(h, options...); err != nil {
 		return nil, fmt.Errorf("autonat: %w", err)
 	}
 
@@ -230,7 +235,7 @@ func New(ctx context.Context, signer hopCrypto.Signer, networkID uint64, overlay
 		advertisableAddresser = natAddrResolver
 	}
 
-	handshakeService, err := handshake.New(signer, advertisableAddresser, swapBackend, overlay, networkID, o.FullNode, o.Transaction, o.WelcomeMessage, h.ID(), logger)
+	handshakeService, err := handshake.New(signer, advertisableAddresser, swapBackend, overlay, networkID, o.FullNode, o.Transaction, o.WelcomeMessage, o.ValidateOverlay, h.ID(), logger)
 	if err != nil {
 		return nil, fmt.Errorf("handshake service: %w", err)
 	}
@@ -240,7 +245,7 @@ func New(ctx context.Context, signer hopCrypto.Signer, networkID uint64, overlay
 	// the addresses used are not dialable and hence should be cleaned up. We should create
 	// this host with the same transports and security options to be able to dial to other
 	// peers.
-	pingDialer, err := o.hostFactory(ctx, append(transports, security, libp2p.NoListenAddrs)...)
+	pingDialer, err := o.hostFactory(append(transports, security, libp2p.NoListenAddrs)...)
 	if err != nil {
 		return nil, err
 	}
@@ -282,18 +287,11 @@ func New(ctx context.Context, signer hopCrypto.Signer, networkID uint64, overlay
 		return nil, fmt.Errorf("protocol version match %s: %w", id, err)
 	}
 
-	if err := s.reachabilityWorker(); err != nil {
-		return nil, err
-	}
-
 	s.host.SetStreamHandlerMatch(id, matcher, s.handleIncoming)
 
-	h.Network().SetConnHandler(func(_ network.Conn) {
-		s.metrics.HandledConnectionCount.Inc()
-	})
-
-	h.Network().Notify(peerRegistry)       // update peer registry on network events
-	h.Network().Notify(s.handshakeService) // update handshake service on network events
+	connMetricNotify := newConnMetricNotify(s.metrics)
+	h.Network().Notify(peerRegistry) // update peer registry on network events
+	h.Network().Notify(connMetricNotify)
 	return s, nil
 }
 
@@ -471,8 +469,8 @@ func (s *Service) handleIncoming(stream network.Stream) {
 
 	peerUserAgent := appendSpace(s.peerUserAgent(s.ctx, peerID))
 
-	s.logger.Debugf("stream handler: successfully connected to peer %s%s%s (inbound)", i.HopAddress.ShortString(), i.LightString(), peerUserAgent)
-	s.logger.Infof("stream handler: successfully connected to peer %s%s%s (inbound)", i.HopAddress.Overlay, i.LightString(), peerUserAgent)
+	s.logger.Tracef("stream handler: successfully connected to peer %s%s%s (inbound)", i.HopAddress.ShortString(), i.LightString(), peerUserAgent)
+	s.logger.Debugf("stream handler: successfully connected to peer %s%s%s (inbound)", i.HopAddress.Overlay, i.LightString(), peerUserAgent)
 }
 
 func (s *Service) SetPickyNotifier(n p2p.PickyNotifier) {
@@ -551,10 +549,15 @@ func (s *Service) AddProtocol(p p2p.ProtocolSpec) (err error) {
 					}
 					logger.Tracef("handler(%s): blocklisted %s", p.Name, overlay.String())
 				}
-				// count unexpected requests
+
 				if errors.Is(err, p2p.ErrUnexpected) {
 					s.metrics.UnexpectedProtocolReqCount.Inc()
 				}
+
+				if errors.Is(err, network.ErrReset) {
+					s.metrics.StreamHandlerErrResetCount.Inc()
+				}
+
 				logger.Debugf("could not handle protocol %s/%s: stream %s: peer %s: error: %v", p.Name, p.Version, ss.Name, overlay, err)
 				return
 			}
@@ -592,6 +595,10 @@ func (s *Service) NATManager() basichost.NATManager {
 }
 
 func (s *Service) Blocklist(overlay swarm.Address, duration time.Duration, reason string) error {
+	if s.NetworkStatus() != p2p.NetworkStatusAvailable {
+		return errors.New("blocklisting peer when network not available")
+	}
+
 	s.logger.Tracef("libp2p blocklist: peer %s for %v reason: %s", overlay.String(), duration, reason)
 	if err := s.blocklist.Add(overlay, duration); err != nil {
 		s.metrics.BlocklistedPeerErrCount.Inc()
@@ -619,6 +626,8 @@ func buildUnderlayAddress(addr ma.Multiaddr, peerID libp2ppeer.ID) (ma.Multiaddr
 }
 
 func (s *Service) Connect(ctx context.Context, addr ma.Multiaddr) (address *hop.Address, err error) {
+	defer func() { err = multierror.Append(err, s.determineCurrentNetworkStatus(err)).ErrorOrNil() }()
+
 	// Extract the peer ID from the multiaddr.
 	info, err := libp2ppeer.AddrInfoFromP2pAddr(addr)
 	if err != nil {
@@ -676,14 +685,14 @@ func (s *Service) Connect(ctx context.Context, addr ma.Multiaddr) (address *hop.
 		s.logger.Errorf("internal error while connecting with peer %s", info.ID)
 		_ = handshakeStream.Reset()
 		_ = s.host.Network().ClosePeer(info.ID)
-		return nil, fmt.Errorf("peer blocklisted")
+		return nil, err
 	}
 
 	if blocked {
 		s.logger.Errorf("blocked connection to blocklisted peer %s", info.ID)
 		_ = handshakeStream.Reset()
 		_ = s.host.Network().ClosePeer(info.ID)
-		return nil, fmt.Errorf("peer blocklisted")
+		return nil, p2p.ErrPeerBlocklisted
 	}
 
 	if exists := s.peers.addIfNotExists(stream.Conn(), overlay, i.FullNode); exists {
@@ -734,12 +743,12 @@ func (s *Service) Connect(ctx context.Context, addr ma.Multiaddr) (address *hop.
 
 	peerUserAgent := appendSpace(s.peerUserAgent(ctx, info.ID))
 
-	s.logger.Debugf("successfully connected to peer %s%s%s (outbound)", i.HopAddress.ShortString(), i.LightString(), peerUserAgent)
-	s.logger.Infof("successfully connected to peer %s%s%s (outbound)", overlay, i.LightString(), peerUserAgent)
+	s.logger.Tracef("successfully connected to peer %s%s%s (outbound)", i.HopAddress.ShortString(), i.LightString(), peerUserAgent)
+	s.logger.Debugf("successfully connected to peer %s%s%s (outbound)", overlay, i.LightString(), peerUserAgent)
 	return i.HopAddress, nil
 }
 
-func (s *Service) Disconnect(overlay swarm.Address, reason string) error {
+func (s *Service) Disconnect(overlay swarm.Address, reason string) (err error) {
 	s.metrics.DisconnectCount.Inc()
 
 	s.logger.Debugf("libp2p disconnect: disconnecting peer %s reason: %s", overlay, reason)
@@ -816,6 +825,10 @@ func (s *Service) Peers() []p2p.Peer {
 	return s.peers.peers()
 }
 
+func (s *Service) Blocklisted(overlay swarm.Address) (bool, error) {
+	return s.blocklist.Exists(overlay)
+}
+
 func (s *Service) BlocklistedPeers() ([]p2p.Peer, error) {
 	return s.blocklist.Peers()
 }
@@ -838,7 +851,8 @@ func (s *Service) NewStream(ctx context.Context, overlay swarm.Address, headers 
 		headers = make(p2p.Headers)
 	}
 	if err := s.tracer.AddContextHeader(ctx, headers); err != nil && !errors.Is(err, tracing.ErrContextNotFound) {
-		return nil, err
+		_ = stream.Reset()
+		return nil, fmt.Errorf("new stream add context header fail: %w", err)
 	}
 
 	// exchange headers
@@ -896,8 +910,13 @@ func (s *Service) GetWelcomeMessage() string {
 	return s.handshakeService.GetWelcomeMessage()
 }
 
-func (s *Service) Ready() {
+func (s *Service) Ready() error {
+	if err := s.reachabilityWorker(); err != nil {
+		return fmt.Errorf("reachability worker: %w", err)
+	}
+
 	close(s.ready)
+	return nil
 }
 
 func (s *Service) Halt() {
@@ -964,6 +983,35 @@ func (s *Service) peerUserAgent(ctx context.Context, peerID libp2ppeer.ID) strin
 	return ua
 }
 
+// NetworkStatus implements the p2p.NetworkStatuser interface.
+func (s *Service) NetworkStatus() p2p.NetworkStatus {
+	return p2p.NetworkStatus(s.networkStatus.Load())
+}
+
+// determineCurrentNetworkStatus determines if the network
+// is available/unavailable based on the given error, and
+// returns ErrNetworkUnavailable if unavailable.
+// The result of this operation is stored and can be reflected
+// in the results of future NetworkStatus method calls.
+func (s *Service) determineCurrentNetworkStatus(err error) error {
+	switch {
+	case err == nil:
+		s.networkStatus.Store(int32(p2p.NetworkStatusAvailable))
+	case errors.Is(err, lp2pswarm.ErrDialBackoff):
+		if s.NetworkStatus() == p2p.NetworkStatusUnavailable {
+			err = p2p.ErrNetworkUnavailable
+		}
+	case isNetworkOrHostUnreachableError(err):
+		s.networkStatus.Store(int32(p2p.NetworkStatusUnavailable))
+		err = p2p.ErrNetworkUnavailable
+	default:
+		if s.NetworkStatus() != p2p.NetworkStatusUnavailable {
+			s.networkStatus.Store(int32(p2p.NetworkStatusUnknown))
+		}
+	}
+	return err
+}
+
 // appendSpace adds a leading space character if the string is not empty.
 // It is useful for constructing log messages with conditional substrings.
 func appendSpace(s string) string {
@@ -976,4 +1024,50 @@ func appendSpace(s string) string {
 // userAgent returns a User Agent string passed to the libp2p host to identify peer node.
 func userAgent() string {
 	return fmt.Sprintf("hop/%s %s %s/%s", version.Version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+}
+
+func newConnMetricNotify(m metrics) *connectionNotifier {
+	return &connectionNotifier{
+		metrics:  m,
+		Notifiee: new(network.NoopNotifiee),
+	}
+}
+
+type connectionNotifier struct {
+	metrics metrics
+	network.Notifiee
+}
+
+func (c *connectionNotifier) Connected(_ network.Network, _ network.Conn) {
+	c.metrics.HandledConnectionCount.Inc()
+}
+
+// isNetworkOrHostUnreachableError determines based on the
+// given error whether the host or network is reachable.
+func isNetworkOrHostUnreachableError(err error) bool {
+	var de *lp2pswarm.DialError
+	if !errors.As(err, &de) {
+		return false
+	}
+
+	// Since TransportError doesn't implement the Unwrap
+	// method we need to inspect the errors manually.
+	for i := range de.DialErrors {
+		var te *lp2pswarm.TransportError
+		if !errors.As(&de.DialErrors[i], &te) {
+			continue
+		}
+
+		var ne *net.OpError
+		if !errors.As(te.Cause, &ne) || ne.Op != "dial" {
+			continue
+		}
+
+		var se *os.SyscallError
+		if errors.As(ne, &se) && strings.HasPrefix(se.Syscall, "connect") &&
+			(errors.Is(se.Err, errHostUnreachable) || errors.Is(se.Err, errNetworkUnreachable)) {
+			return true
+		}
+	}
+	return false
 }

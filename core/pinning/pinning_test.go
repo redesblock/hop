@@ -14,7 +14,7 @@ import (
 )
 
 func TestPinningService(t *testing.T) {
-	const content = "Hello, Hop!"
+	const content = "Hello, hop!"
 
 	var (
 		ctx        = context.Background()

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"strings"
 	"sync"
+	"time"
 
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/postage"
@@ -14,35 +14,34 @@ import (
 )
 
 const (
-	batchKeyPrefix              = "batchstore_batch_"
-	valueKeyPrefix              = "batchstore_value_"
-	chainStateKey               = "batchstore_chainstate"
-	reserveStateKey             = "batchstore_reservestate"
-	unreserveQueueKey           = "batchstore_unreserve_queue_"
-	ureserveQueueCardinalityKey = "batchstore_queue_cardinality"
+	batchKeyPrefix  = "batchstore_batch_"
+	valueKeyPrefix  = "batchstore_value_"
+	chainStateKey   = "batchstore_chainstate"
+	reserveStateKey = "batchstore_reservestate"
 )
 
-type unreserveFn func(batchID []byte, radius uint8) error
+// ErrNotFound signals that the element was not found.
+var ErrNotFound = errors.New("batchstore: not found")
+
 type evictFn func(batchID []byte) error
 
 // store implements postage.Storer
 type store struct {
+	mtx sync.Mutex
+
 	store storage.StateStorer // State store backend to persist batches.
 	cs    *postage.ChainState // the chain state
 
-	rsMtx       sync.Mutex
-	rs          *reserveState // the reserve state
-	unreserveFn unreserveFn   // unreserve function
-	evictFn     evictFn       // evict function
-	queueIdx    uint64        // unreserve queue cardinality
-	metrics     metrics       // metrics
-	logger      logging.Logger
+	rs      *reserveState // the reserve state
+	evictFn evictFn       // evict function
+	metrics metrics       // metrics
+	logger  logging.Logger
 
 	radiusSetter postage.RadiusSetter // setter for radius notifications
 }
 
 // New constructs a new postage batch store.
-// It initialises both chain state and reserve state from the persistent state store
+// It initialises both chain state and reserve state from the persistent state store.
 func New(st storage.StateStorer, ev evictFn, logger logging.Logger) (postage.Storer, error) {
 	cs := &postage.ChainState{}
 	err := st.Get(chainStateKey, cs)
@@ -63,10 +62,8 @@ func New(st storage.StateStorer, ev evictFn, logger logging.Logger) (postage.Sto
 			return nil, err
 		}
 		rs = &reserveState{
-			Radius:    DefaultDepth,
-			Inner:     big.NewInt(0),
-			Outer:     big.NewInt(0),
-			Available: Capacity,
+			Radius:        0,
+			StorageRadius: 0,
 		}
 	}
 
@@ -79,123 +76,66 @@ func New(st storage.StateStorer, ev evictFn, logger logging.Logger) (postage.Sto
 		logger:  logger,
 	}
 
-	s.unreserveFn = s.unreserve
-	if s.queueIdx, err = s.getQueueCardinality(); err != nil {
-		return nil, err
-	}
-
 	return s, nil
 }
 
 func (s *store) GetReserveState() *postage.ReserveState {
-	s.rsMtx.Lock()
-	defer s.rsMtx.Unlock()
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
 	return &postage.ReserveState{
 		Radius:        s.rs.Radius,
 		StorageRadius: s.rs.StorageRadius,
-		Available:     s.rs.Available,
-		Outer:         new(big.Int).Set(s.rs.Outer),
-		Inner:         new(big.Int).Set(s.rs.Inner),
 	}
+}
+
+func (s *store) GetChainState() *postage.ChainState {
+	return s.cs
 }
 
 // Get returns a batch from the batchstore with the given ID.
 func (s *store) Get(id []byte) (*postage.Batch, error) {
+
+	defer func(t time.Time) {
+		s.metrics.GetDuration.WithLabelValues("true").Observe(time.Since(t).Seconds())
+	}(time.Now())
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	defer func(t time.Time) {
+		s.metrics.GetDuration.WithLabelValues("false").Observe(time.Since(t).Seconds())
+	}(time.Now())
+
+	return s.get(id)
+}
+
+// get returns the postage batch from the statestore.
+// Must be called under lock.
+func (s *store) get(id []byte) (*postage.Batch, error) {
 	b := &postage.Batch{}
 	err := s.store.Get(batchKey(id), b)
 	if err != nil {
 		return nil, fmt.Errorf("get batch %s: %w", hex.EncodeToString(id), err)
 	}
-
-	s.rsMtx.Lock()
-	defer s.rsMtx.Unlock()
-
-	if s.rs.StorageRadius < s.rs.Radius {
-		b.Radius = s.rs.StorageRadius
-	} else {
-		b.Radius = s.rs.radius(s.rs.tier(b.Value))
-	}
 	return b, nil
 }
 
-// Put stores a given batch in the batchstore and requires new values of Value and Depth
-func (s *store) Put(b *postage.Batch, value *big.Int, depth uint8) error {
-	oldVal := new(big.Int).Set(b.Value)
-	oldDepth := b.Depth
-	err := s.store.Delete(valueKey(oldVal, b.ID))
-	if err != nil {
-		return err
-	}
-	b.Value.Set(value)
-	b.Depth = depth
-	err = s.store.Put(valueKey(b.Value, b.ID), nil)
-	if err != nil {
-		return err
-	}
-	err = s.update(b, oldDepth, oldVal)
-	if err != nil {
-		return err
-	}
-
-	if s.radiusSetter != nil {
-		s.rsMtx.Lock()
-		s.radiusSetter.SetRadius(s.rs.Radius)
-		s.rsMtx.Unlock()
-	}
-	return s.store.Put(batchKey(b.ID), b)
-}
-
-// delete removes the batches with ids given as arguments.
-func (s *store) delete(ids ...[]byte) error {
-	for _, id := range ids {
-		b, err := s.Get(id)
-		if err != nil {
-			return err
-		}
-		err = s.store.Delete(valueKey(b.Value, id))
-		if err != nil {
-			return err
-		}
-		err = s.store.Delete(batchKey(id))
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// PutChainState implements BatchStorer.
-// It purges expired batches and unreserves underfunded ones before it
-// stores the chain state in the batch store.
-func (s *store) PutChainState(cs *postage.ChainState) error {
-	s.cs = cs
-	err := s.evictExpired()
-	if err != nil {
-		return err
-	}
-	// this needs to be improved, since we can miss some calls on
-	// startup. the same goes for the other call to radiusSetter
-	if s.radiusSetter != nil {
-		s.rsMtx.Lock()
-		s.radiusSetter.SetRadius(s.rs.Radius)
-		s.rsMtx.Unlock()
-	}
-
-	return s.store.Put(chainStateKey, cs)
-}
-
-// GetChainState implements BatchStorer. It returns the stored chain state from
-// the batch store.
-func (s *store) GetChainState() *postage.ChainState {
-	return s.cs
-}
-
-func (s *store) SetRadiusSetter(r postage.RadiusSetter) {
-	s.radiusSetter = r
-}
-
-// Exists reports whether batch referenced by the give id exists.
+// Exists is implementation of postage.Storer interface Exists method.
 func (s *store) Exists(id []byte) (bool, error) {
+
+	defer func(t time.Time) {
+		s.metrics.ExistsDuration.WithLabelValues("true").Observe(time.Since(t).Seconds())
+	}(time.Now())
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	defer func(t time.Time) {
+		s.metrics.ExistsDuration.WithLabelValues("false").Observe(time.Since(t).Seconds())
+	}(time.Now())
+
 	switch err := s.store.Get(batchKey(id), new(postage.Batch)); {
 	case err == nil:
 		return true, nil
@@ -206,45 +146,179 @@ func (s *store) Exists(id []byte) (bool, error) {
 	}
 }
 
-func (s *store) Reset() error {
-	prefix := "batchstore_"
-	if err := s.store.Iterate(prefix, func(k, _ []byte) (bool, error) {
-		if strings.HasPrefix(string(k), prefix) {
-			if err := s.store.Delete(string(k)); err != nil {
-				return false, err
-			}
+// Iterate is implementation of postage.Storer interface Iterate method.
+func (s *store) Iterate(cb func(*postage.Batch) (bool, error)) error {
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	return s.store.Iterate(batchKeyPrefix, func(key, value []byte) (bool, error) {
+		b := &postage.Batch{}
+		if err := b.UnmarshalBinary(value); err != nil {
+			return false, err
 		}
-		return false, nil
+		return cb(b)
+	})
+}
+
+// Save is implementation of postage.Storer interface Save method.
+// This method has side effects; it also updates the radius of the node if successful.
+func (s *store) Save(batch *postage.Batch) error {
+	defer func(t time.Time) {
+		s.metrics.SaveDuration.WithLabelValues("true").Observe(time.Since(t).Seconds())
+	}(time.Now())
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	defer func(t time.Time) {
+		s.metrics.SaveDuration.WithLabelValues("false").Observe(time.Since(t).Seconds())
+	}(time.Now())
+
+	switch err := s.store.Get(batchKey(batch.ID), new(postage.Batch)); {
+	case errors.Is(err, storage.ErrNotFound):
+		batch.StorageRadius = s.rs.StorageRadius
+		if err := s.store.Put(batchKey(batch.ID), batch); err != nil {
+			return err
+		}
+
+		if err := s.saveBatch(batch); err != nil {
+			return err
+		}
+
+		if s.radiusSetter != nil {
+			s.radiusSetter.SetRadius(s.rs.Radius)
+		}
+		return nil
+	case err == nil:
+		return fmt.Errorf("batchstore: save batch %s depth %d value %d failed: already exists", hex.EncodeToString(batch.ID), batch.Depth, batch.Value.Int64())
+	case err != nil:
+		return fmt.Errorf("batchstore: save batch %s depth %d value %d failed: get batch: %w", hex.EncodeToString(batch.ID), batch.Depth, batch.Value.Int64(), err)
+	}
+
+	s.logger.Debugf("batchstore: saved batch %x depth %d value %d, radius %d, storage radius %d", batch.ID, batch.Depth, batch.Value.Int64(), s.rs.Radius, s.rs.StorageRadius)
+
+	return nil
+}
+
+// Update is implementation of postage.Storer interface Update method.
+// This method has side effects; it also updates the radius of the node if successful.
+func (s *store) Update(batch *postage.Batch, value *big.Int, depth uint8) error {
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	oldBatch := &postage.Batch{}
+
+	s.logger.Debugf("batchstore: update batch %x depth %d value %d", batch.ID, depth, value.Int64())
+
+	switch err := s.store.Get(batchKey(batch.ID), oldBatch); {
+	case errors.Is(err, storage.ErrNotFound):
+		return ErrNotFound
+	case err != nil:
+		return fmt.Errorf("get batch %s: %w", hex.EncodeToString(batch.ID), err)
+	}
+
+	if err := s.store.Delete(valueKey(batch.Value, batch.ID)); err != nil {
+		return err
+	}
+
+	batch.Value.Set(value)
+	batch.Depth = depth
+	batch.StorageRadius = oldBatch.StorageRadius
+
+	err := s.store.Put(batchKey(batch.ID), batch)
+	if err != nil {
+		return err
+	}
+
+	err = s.saveBatch(batch)
+	if err != nil {
+		return err
+	}
+
+	if s.radiusSetter != nil {
+		s.radiusSetter.SetRadius(s.rs.Radius)
+	}
+
+	return nil
+}
+
+// PutChainState is implementation of postage.Storer interface PutChainState method.
+// This method has side effects; it purges expired batches and unreserves underfunded
+// ones before it stores the chain state in the store.
+func (s *store) PutChainState(cs *postage.ChainState) error {
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	s.cs = cs
+
+	s.logger.Debugf("batchstore: put chain state block %d amount %d price %d", cs.Block, cs.TotalAmount.Int64(), cs.CurrentPrice.Int64())
+
+	err := s.cleanup()
+	if err != nil {
+		return fmt.Errorf("batchstore: put chain state clean up: %w", err)
+	}
+
+	err = s.computeRadius()
+	if err != nil {
+		return fmt.Errorf("batchstore: put chain state adjust radius: %w", err)
+	}
+
+	// this needs to be improved, since we can miss some calls on
+	// startup. the same goes for the other call to radiusSetter
+	if s.radiusSetter != nil {
+		s.radiusSetter.SetRadius(s.rs.Radius)
+	}
+
+	return s.store.Put(chainStateKey, cs)
+}
+
+// SetRadiusSetter is implementation of postage.Storer interface SetRadiusSetter method.
+func (s *store) SetRadiusSetter(r postage.RadiusSetter) {
+	s.radiusSetter = r
+}
+
+// Reset is implementation of postage.Storer interface Reset method.
+func (s *store) Reset() error {
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	const prefix = "batchstore_"
+	if err := s.store.Iterate(prefix, func(k, _ []byte) (bool, error) {
+		return false, s.store.Delete(string(k))
 	}); err != nil {
 		return err
 	}
+
 	s.cs = &postage.ChainState{
 		Block:        0,
 		TotalAmount:  big.NewInt(0),
 		CurrentPrice: big.NewInt(0),
 	}
+
 	s.rs = &reserveState{
-		Radius:    DefaultDepth,
-		Inner:     big.NewInt(0),
-		Outer:     big.NewInt(0),
-		Available: Capacity,
+		Radius: 0,
 	}
+
 	return nil
 }
 
 // batchKey returns the index key for the batch ID used in the by-ID batch index.
-func batchKey(id []byte) string {
-	return batchKeyPrefix + string(id)
+func batchKey(batchID []byte) string {
+	return batchKeyPrefix + string(batchID)
 }
 
 // valueKey returns the index key for the batch ID used in the by-ID batch index.
-func valueKey(val *big.Int, id []byte) string {
+func valueKey(val *big.Int, batchID []byte) string {
 	value := make([]byte, 32)
 	val.FillBytes(value) // zero-extended big-endian byte slice
-	return valueKeyPrefix + string(value) + string(id)
+	return valueKeyPrefix + string(value) + string(batchID)
 }
 
-// valueKeyToID extracts the batch ID from a value key - used in value-based iteration
+// valueKeyToID extracts the batch ID from a value key - used in value-based iteration.
 func valueKeyToID(key []byte) []byte {
 	l := len(key)
 	return key[l-32 : l]

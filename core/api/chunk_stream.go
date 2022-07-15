@@ -11,16 +11,19 @@ import (
 	"github.com/redesblock/hop/core/cac"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/postage"
+	"github.com/redesblock/hop/core/sctx"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
 )
 
+const streamReadTimeout = 15 * time.Minute
+
 var successWsMsg = []byte{}
 
-func (s *server) chunkUploadStreamHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Service) chunkUploadStreamHandler(w http.ResponseWriter, r *http.Request) {
 
-	ctx, tag, putter, err := s.processUploadRequest(r)
+	_, tag, putter, wait, err := s.processUploadRequest(r)
 	if err != nil {
 		jsonhttp.BadRequest(w, err.Error())
 		return
@@ -40,24 +43,31 @@ func (s *server) chunkUploadStreamHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	cctx := context.Background()
+	if tag != nil {
+		cctx = sctx.SetTag(cctx, tag)
+	}
+
 	s.wsWg.Add(1)
 	go s.handleUploadStream(
-		ctx,
+		cctx,
 		c,
 		tag,
 		putter,
 		requestModePut(r),
 		strings.ToLower(r.Header.Get(SwarmPinHeader)) == "true",
+		wait,
 	)
 }
 
-func (s *server) handleUploadStream(
+func (s *Service) handleUploadStream(
 	ctx context.Context,
 	conn *websocket.Conn,
 	tag *tags.Tag,
 	putter storage.Putter,
 	mode storage.ModePut,
 	pin bool,
+	wait func() error,
 ) {
 	defer s.wsWg.Done()
 
@@ -67,6 +77,9 @@ func (s *server) handleUploadStream(
 	)
 	defer func() {
 		_ = conn.Close()
+		if err = wait(); err != nil {
+			s.logger.Errorf("chunk stream handler: errors syncing chunks: %v", err)
+		}
 	}()
 
 	conn.SetCloseHandler(func(code int, text string) error {
@@ -94,7 +107,7 @@ func (s *server) handleUploadStream(
 			time.Now().Add(writeDeadline),
 		)
 		if err != nil {
-			s.logger.Errorf("chunk stream handler: failed sending close msg")
+			s.logger.Error("chunk stream handler: failed sending close msg")
 		}
 	}
 
@@ -111,7 +124,7 @@ func (s *server) handleUploadStream(
 			// if there is no indication to stop, go ahead and read the next message
 		}
 
-		err = conn.SetReadDeadline(time.Now().Add(readDeadline))
+		err = conn.SetReadDeadline(time.Now().Add(streamReadTimeout))
 		if err != nil {
 			s.logger.Debugf("chunk stream handler: set read deadline: %v", err)
 			s.logger.Error("chunk stream handler: set read deadline")

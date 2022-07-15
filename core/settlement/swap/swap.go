@@ -8,6 +8,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/redesblock/hop/core/logging"
+	"github.com/redesblock/hop/core/postage/postagecontract"
 	"github.com/redesblock/hop/core/settlement"
 	"github.com/redesblock/hop/core/settlement/swap/chequebook"
 	"github.com/redesblock/hop/core/settlement/swap/swapprotocol"
@@ -22,6 +23,7 @@ var (
 	ErrUnknownBeneficary = errors.New("unknown beneficiary for peer")
 	// ErrChequeValueTooLow is the error a peer issued a cheque not covering 1 accounting credit
 	ErrChequeValueTooLow = errors.New("cheque value too low")
+	ErrNoChequebook      = errors.New("no chequebook")
 )
 
 type Interface interface {
@@ -42,31 +44,33 @@ type Interface interface {
 
 // Service is the implementation of the swap settlement layer.
 type Service struct {
-	proto       swapprotocol.Interface
-	logger      logging.Logger
-	store       storage.StateStorer
-	accounting  settlement.Accounting
-	metrics     metrics
-	chequebook  chequebook.Service
-	chequeStore chequebook.ChequeStore
-	cashout     chequebook.CashoutService
-	addressbook Addressbook
-	networkID   uint64
+	proto          swapprotocol.Interface
+	logger         logging.Logger
+	store          storage.StateStorer
+	accounting     settlement.Accounting
+	metrics        metrics
+	chequebook     chequebook.Service
+	chequeStore    chequebook.ChequeStore
+	cashout        chequebook.CashoutService
+	addressbook    Addressbook
+	networkID      uint64
+	cashoutAddress common.Address
 }
 
 // New creates a new swap Service.
-func New(proto swapprotocol.Interface, logger logging.Logger, store storage.StateStorer, chequebook chequebook.Service, chequeStore chequebook.ChequeStore, addressbook Addressbook, networkID uint64, cashout chequebook.CashoutService, accounting settlement.Accounting) *Service {
+func New(proto swapprotocol.Interface, logger logging.Logger, store storage.StateStorer, chequebook chequebook.Service, chequeStore chequebook.ChequeStore, addressbook Addressbook, networkID uint64, cashout chequebook.CashoutService, accounting settlement.Accounting, cashoutAddress common.Address) *Service {
 	return &Service{
-		proto:       proto,
-		logger:      logger,
-		store:       store,
-		metrics:     newMetrics(),
-		chequebook:  chequebook,
-		chequeStore: chequeStore,
-		addressbook: addressbook,
-		networkID:   networkID,
-		cashout:     cashout,
-		accounting:  accounting,
+		proto:          proto,
+		logger:         logger,
+		store:          store,
+		metrics:        newMetrics(),
+		chequebook:     chequebook,
+		chequeStore:    chequeStore,
+		addressbook:    addressbook,
+		networkID:      networkID,
+		cashout:        cashout,
+		accounting:     accounting,
+		cashoutAddress: cashoutAddress,
 	}
 }
 
@@ -119,6 +123,10 @@ func (s *Service) Pay(ctx context.Context, peer swarm.Address, amount *big.Int) 
 			s.accounting.NotifyPaymentSent(peer, amount, err)
 		}
 	}()
+	if s.chequebook == nil {
+		err = ErrNoChequebook
+		return
+	}
 	beneficiary, known, err := s.addressbook.Beneficiary(peer)
 	if err != nil {
 		return
@@ -155,6 +163,9 @@ func (s *Service) TotalSent(peer swarm.Address) (totalSent *big.Int, err error) 
 	if !known {
 		return nil, settlement.ErrPeerNoSettlements
 	}
+	if s.chequebook == nil {
+		return big.NewInt(0), nil
+	}
 	cheque, err := s.chequebook.LastCheque(beneficiary)
 	if err != nil {
 		if err == chequebook.ErrNoCheque {
@@ -188,6 +199,9 @@ func (s *Service) TotalReceived(peer swarm.Address) (totalReceived *big.Int, err
 // SettlementsSent returns sent settlements for each individual known peer
 func (s *Service) SettlementsSent() (map[string]*big.Int, error) {
 	result := make(map[string]*big.Int)
+	if s.chequebook == nil {
+		return result, nil
+	}
 	cheques, err := s.chequebook.LastCheques()
 	if err != nil {
 		return nil, err
@@ -264,6 +278,10 @@ func (s *Service) LastSentCheque(peer swarm.Address) (*chequebook.SignedCheque, 
 		return nil, chequebook.ErrNoCheque
 	}
 
+	if s.chequebook == nil {
+		return nil, ErrNoChequebook
+	}
+
 	return s.chequebook.LastCheque(common)
 }
 
@@ -285,6 +303,9 @@ func (s *Service) LastReceivedCheque(peer swarm.Address) (*chequebook.SignedCheq
 
 // LastSentCheques returns the list of last sent cheques for all peers
 func (s *Service) LastSentCheques() (map[string]*chequebook.SignedCheque, error) {
+	if s.chequebook == nil {
+		return nil, ErrNoChequebook
+	}
 	lastcheques, err := s.chequebook.LastCheques()
 	if err != nil {
 		return nil, err
@@ -330,7 +351,7 @@ func (s *Service) CashCheque(ctx context.Context, peer swarm.Address) (common.Ha
 	if !known {
 		return common.Hash{}, chequebook.ErrNoCheque
 	}
-	return s.cashout.CashCheque(ctx, chequebookAddress, s.chequebook.Address())
+	return s.cashout.CashCheque(ctx, chequebookAddress, s.cashoutAddress)
 }
 
 // CashoutStatus gets the status of the latest cashout transaction for the peers chequebook
@@ -355,4 +376,55 @@ func (s *Service) GetDeductionByPeer(peer swarm.Address) (bool, error) {
 
 func (s *Service) AddDeductionByPeer(peer swarm.Address) error {
 	return s.addressbook.AddDeductionBy(peer)
+}
+
+type NoOpSwap struct {
+}
+
+func (*NoOpSwap) TotalSent(peer swarm.Address) (totalSent *big.Int, err error) {
+	return nil, postagecontract.ErrChainDisabled
+}
+
+// TotalReceived returns the total amount received from a peer
+func (*NoOpSwap) TotalReceived(peer swarm.Address) (totalSent *big.Int, err error) {
+	return nil, postagecontract.ErrChainDisabled
+}
+
+// SettlementsSent returns sent settlements for each individual known peer
+func (*NoOpSwap) SettlementsSent() (map[string]*big.Int, error) {
+	return nil, postagecontract.ErrChainDisabled
+}
+
+// SettlementsReceived returns received settlements for each individual known peer
+func (*NoOpSwap) SettlementsReceived() (map[string]*big.Int, error) {
+	return nil, postagecontract.ErrChainDisabled
+}
+
+func (*NoOpSwap) LastSentCheque(peer swarm.Address) (*chequebook.SignedCheque, error) {
+	return nil, postagecontract.ErrChainDisabled
+}
+
+// LastSentCheques returns the list of last sent cheques for all peers
+func (*NoOpSwap) LastSentCheques() (map[string]*chequebook.SignedCheque, error) {
+	return nil, postagecontract.ErrChainDisabled
+}
+
+// LastReceivedCheque returns the last received cheque for the peer
+func (*NoOpSwap) LastReceivedCheque(peer swarm.Address) (*chequebook.SignedCheque, error) {
+	return nil, postagecontract.ErrChainDisabled
+}
+
+// LastReceivedCheques returns the list of last received cheques for all peers
+func (*NoOpSwap) LastReceivedCheques() (map[string]*chequebook.SignedCheque, error) {
+	return nil, postagecontract.ErrChainDisabled
+}
+
+// CashCheque sends a cashing transaction for the last cheque of the peer
+func (*NoOpSwap) CashCheque(ctx context.Context, peer swarm.Address) (common.Hash, error) {
+	return common.Hash{}, postagecontract.ErrChainDisabled
+}
+
+// CashoutStatus gets the status of the latest cashout transaction for the peers chequebook
+func (*NoOpSwap) CashoutStatus(ctx context.Context, peer swarm.Address) (*chequebook.CashoutStatus, error) {
+	return nil, postagecontract.ErrChainDisabled
 }

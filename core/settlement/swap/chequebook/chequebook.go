@@ -8,9 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	hopabi "github.com/redesblock/hop/contracts/abi"
-
 	"github.com/ethereum/go-ethereum/common"
+	hopabi "github.com/redesblock/hop/contracts/abi"
 	"github.com/redesblock/hop/core/sctx"
 	"github.com/redesblock/hop/core/settlement/swap/erc20"
 	"github.com/redesblock/hop/core/storage"
@@ -343,7 +342,6 @@ func (s *service) Withdraw(ctx context.Context, amount *big.Int) (hash common.Ha
 	if err != nil {
 		return common.Hash{}, err
 	}
-
 	if err := s.storeTx(ctx, txHash, false); err != nil {
 		return common.Hash{}, err
 	}
@@ -358,13 +356,17 @@ func (s *service) storeTx(ctx context.Context, txHash common.Hash, wait bool) er
 			return err
 		}
 
-		s.store.Put(keyPrefix+txHash.String(), receipt)
+		if s.store != nil {
+			s.store.Put(keyPrefix+txHash.String(), txHash)
+		}
 
 		if receipt.Status == 0 {
 			return transaction.ErrTransactionReverted
 		}
 	} else {
-		s.store.Put(keyPrefix+txHash.String(), txHash)
+		if s.store != nil {
+			s.store.Put(keyPrefix+txHash.String(), txHash)
+		}
 	}
 
 	return nil

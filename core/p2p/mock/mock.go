@@ -137,6 +137,10 @@ func (s *Service) Peers() []p2p.Peer {
 	return s.peersFunc()
 }
 
+func (s *Service) Blocklisted(overlay swarm.Address) (bool, error) {
+	return false, nil
+}
+
 func (s *Service) BlocklistedPeers() ([]p2p.Peer, error) {
 	if s.blocklistedPeersFunc == nil {
 		return nil, nil
@@ -171,6 +175,12 @@ func (s *Service) Blocklist(overlay swarm.Address, duration time.Duration, reaso
 
 func (s *Service) SetPickyNotifier(f p2p.PickyNotifier) {
 	s.notifierFunc = f
+}
+
+// NetworkStatus implements p2p.NetworkStatuser interface.
+// It always returns p2p.NetworkStatusAvailable.
+func (s *Service) NetworkStatus() p2p.NetworkStatus {
+	return p2p.NetworkStatusAvailable
 }
 
 type Option interface {

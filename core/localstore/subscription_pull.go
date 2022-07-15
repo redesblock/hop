@@ -13,6 +13,8 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
+const logMore = false
+
 // SubscribePull returns a channel that provides chunk addresses and stored times from pull syncing index.
 // Pull syncing index can be only subscribed to a particular proximity order bin. If since
 // is not 0, the iteration will start from the since item (the item with binID == since). If until is not 0,
@@ -123,7 +125,9 @@ func (db *DB) SubscribePull(ctx context.Context, bin uint8, since, until uint64)
 						return
 					}
 					db.metrics.SubscribePullIterationFailure.Inc()
-					db.logger.Debugf("localstore pull subscription iteration: bin: %d, since: %d, until: %d: %v", bin, since, until, err)
+					if logMore {
+						db.logger.Debugf("localstore pull subscription iteration: bin: %d, since: %d, until: %d: %v", bin, since, until, err)
+					}
 					return
 				}
 				if count > 0 {
@@ -139,7 +143,7 @@ func (db *DB) SubscribePull(ctx context.Context, bin uint8, since, until uint64)
 				return
 			case <-ctx.Done():
 				err := ctx.Err()
-				if err != nil {
+				if err != nil && logMore {
 					db.logger.Debugf("localstore pull subscription iteration: bin: %d, since: %d, until: %d: %v", bin, since, until, err)
 				}
 				return

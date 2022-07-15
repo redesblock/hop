@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/redesblock/hop/core/cac"
-	"github.com/redesblock/hop/core/netstore"
 
 	"github.com/gorilla/mux"
 	"github.com/redesblock/hop/core/jsonhttp"
@@ -25,16 +24,16 @@ type chunkAddressResponse struct {
 	Reference swarm.Address `json:"reference"`
 }
 
-func (s *server) processUploadRequest(
+func (s *Service) processUploadRequest(
 	r *http.Request,
-) (ctx context.Context, tag *tags.Tag, putter storage.Putter, err error) {
+) (ctx context.Context, tag *tags.Tag, putter storage.Putter, waitFn func() error, err error) {
 
 	if h := r.Header.Get(SwarmTagHeader); h != "" {
 		tag, err = s.getTag(h)
 		if err != nil {
 			s.logger.Debugf("chunk upload: get tag: %v", err)
 			s.logger.Error("chunk upload: get tag")
-			return nil, nil, nil, errors.New("cannot get tag")
+			return nil, nil, nil, nil, errors.New("cannot get tag")
 		}
 
 		// add the tag to the context if it exists
@@ -43,31 +42,24 @@ func (s *server) processUploadRequest(
 		ctx = r.Context()
 	}
 
-	batch, err := requestPostageBatchId(r)
-	if err != nil {
-		s.logger.Debugf("chunk upload: postage batch id: %v", err)
-		s.logger.Error("chunk upload: postage batch id")
-		return nil, nil, nil, errors.New("invalid postage batch id")
-	}
-
-	putter, err = newStamperPutter(s.storer, s.post, s.signer, batch)
+	putter, wait, err := s.newStamperPutter(r)
 	if err != nil {
 		s.logger.Debugf("chunk upload: putter: %v", err)
 		s.logger.Error("chunk upload: putter")
 		switch {
 		case errors.Is(err, postage.ErrNotFound):
-			return nil, nil, nil, errors.New("batch not found")
+			return nil, nil, nil, nil, errors.New("batch not found")
 		case errors.Is(err, postage.ErrNotUsable):
-			return nil, nil, nil, errors.New("batch not usable")
+			return nil, nil, nil, nil, errors.New("batch not usable")
 		}
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
-	return ctx, tag, putter, nil
+	return ctx, tag, putter, wait, nil
 }
 
-func (s *server) chunkUploadHandler(w http.ResponseWriter, r *http.Request) {
-	ctx, tag, putter, err := s.processUploadRequest(r)
+func (s *Service) chunkUploadHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, tag, putter, wait, err := s.processUploadRequest(r)
 	if err != nil {
 		jsonhttp.BadRequest(w, err.Error())
 		return
@@ -156,17 +148,19 @@ func (s *server) chunkUploadHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if err = wait(); err != nil {
+		s.logger.Debugf("chunk upload: sync chunk: %v", err)
+		s.logger.Error("chunk upload: sync chunk")
+		jsonhttp.InternalServerError(w, nil)
+		return
+	}
+
 	w.Header().Set("Access-Control-Expose-Headers", SwarmTagHeader)
 	jsonhttp.Created(w, chunkAddressResponse{Reference: chunk.Address()})
 }
 
-func (s *server) chunkGetHandler(w http.ResponseWriter, r *http.Request) {
-	targets := r.URL.Query().Get("targets")
-	if targets != "" {
-		r = r.WithContext(sctx.SetTargets(r.Context(), targets))
-	}
-
-	nameOrHex := mux.Vars(r)["addr"]
+func (s *Service) chunkGetHandler(w http.ResponseWriter, r *http.Request) {
+	nameOrHex := mux.Vars(r)["address"]
 	ctx := r.Context()
 
 	address, err := s.resolveNameOrAddress(nameOrHex)
@@ -185,19 +179,11 @@ func (s *server) chunkGetHandler(w http.ResponseWriter, r *http.Request) {
 			return
 
 		}
-		if errors.Is(err, netstore.ErrRecoveryAttempt) {
-			s.logger.Tracef("chunk: chunk recovery initiated. addr %s", address)
-			jsonhttp.Accepted(w, "chunk recovery initiated. retry after sometime.")
-			return
-		}
 		s.logger.Debugf("chunk: chunk read error: %v ,addr %s", err, address)
 		s.logger.Error("chunk: chunk read error")
 		jsonhttp.InternalServerError(w, "chunk read error")
 		return
 	}
 	w.Header().Set("Content-Type", "binary/octet-stream")
-	if targets != "" {
-		w.Header().Set(TargetsRecoveryHeader, targets)
-	}
 	_, _ = io.Copy(w, bytes.NewReader(chunk.Data()))
 }

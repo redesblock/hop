@@ -422,7 +422,7 @@ func TestPushChunkToNextClosest(t *testing.T) {
 	}
 }
 
-func TestPushChunkToClosestFailedAttemptRetry(t *testing.T) {
+func TestPushChunkToClosestErrorAttemptRetry(t *testing.T) {
 
 	// chunk data to upload
 	chunk := testingc.FixtureChunk("7000")
@@ -706,7 +706,7 @@ func TestPeerSkipList(t *testing.T) {
 	}
 }
 
-func TestPushChunkToClosestSkipFailed(t *testing.T) {
+func TestPushChunkToClosestSkipError(t *testing.T) {
 
 	// chunk data to upload
 	chunk := testingc.FixtureChunk("7000")
@@ -822,7 +822,7 @@ func createPushSyncNodeWithAccounting(t *testing.T, addr swarm.Address, prices p
 		return ch, nil
 	}
 
-	return pushsync.New(addr, blockHash.Bytes(), recorderDisconnecter, storer, mockTopology, mtag, true, unwrap, validStamp, logger, acct, mockPricer, signer, nil, -1, ""), storer, mtag
+	return pushsync.New(addr, blockHash.Bytes(), recorderDisconnecter, storer, mockTopology, mtag, true, unwrap, validStamp, logger, acct, mockPricer, signer, nil, -1, 1, ""), storer, mtag
 }
 
 func waitOnRecordAndTest(t *testing.T, peer swarm.Address, recorder *streamtest.Recorder, add swarm.Address, data []byte) {

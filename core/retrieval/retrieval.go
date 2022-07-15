@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/opentracing/opentracing-go"
@@ -20,6 +19,7 @@ import (
 	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/pricer"
 	pb "github.com/redesblock/hop/core/retrieval/pb"
+	"github.com/redesblock/hop/core/skippeers"
 	"github.com/redesblock/hop/core/soc"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
@@ -95,7 +95,7 @@ func (s *Service) Protocol() p2p.ProtocolSpec {
 
 const (
 	retrieveChunkTimeout          = 10 * time.Second
-	retrieveRetryIntervalDuration = 5 * time.Second
+	retrieveRetryIntervalDuration = time.Second
 	maxRequestRounds              = 256
 	maxSelects                    = 8
 	originSuffix                  = "_origin"
@@ -111,14 +111,13 @@ func (s *Service) RetrieveChunk(ctx context.Context, addr swarm.Address, origin 
 
 	// topCtx is passing the tracing span to the first singleflight call
 	topCtx := ctx
-
 	v, _, err := s.singleflight.Do(ctx, flightRoute, func(ctx context.Context) (interface{}, error) {
 		maxPeers := 1
 		if origin {
 			maxPeers = maxSelects
 		}
 
-		sp := newSkipPeers()
+		sp := new(skippeers.List)
 
 		ticker := time.NewTicker(retrieveRetryIntervalDuration)
 		defer ticker.Stop()
@@ -126,7 +125,7 @@ func (s *Service) RetrieveChunk(ctx context.Context, addr swarm.Address, origin 
 		var (
 			peerAttempt  int
 			peersResults int
-			resultC      = make(chan retrievalResult, maxSelects)
+			resultC      = make(chan retrievalResult)
 		)
 
 		requestAttempt := 0
@@ -152,7 +151,6 @@ func (s *Service) RetrieveChunk(ctx context.Context, addr swarm.Address, origin 
 					// cancel the goroutine just with the timeout
 					ctx, cancel := context.WithTimeout(ctx, retrieveChunkTimeout)
 					defer cancel()
-
 					chunk, peer, requested, err := s.retrieveChunk(ctx, addr, sp, origin)
 					select {
 					case resultC <- retrievalResult{
@@ -169,6 +167,7 @@ func (s *Service) RetrieveChunk(ctx context.Context, addr swarm.Address, origin 
 				select {
 				case resultC <- retrievalResult{}:
 				case <-ctx.Done():
+				default:
 				}
 			}
 
@@ -177,7 +176,7 @@ func (s *Service) RetrieveChunk(ctx context.Context, addr swarm.Address, origin 
 				// break
 			case res := <-resultC:
 				if errors.Is(res.err, topology.ErrNotFound) {
-					if sp.Saturated() {
+					if sp.OverdraftListEmpty() {
 						// if no peer is available, and none skipped temporarily
 						s.logger.Tracef("retrieval: failed to get chunk %s", addr)
 						return nil, storage.ErrNotFound
@@ -221,7 +220,7 @@ func (s *Service) RetrieveChunk(ctx context.Context, addr swarm.Address, origin 
 				if timeNow > lastTime {
 					lastTime = timeNow
 					peerAttempt = 0
-					sp.Reset()
+					sp.ResetOverdraft()
 				} else {
 					select {
 					case <-time.After(600 * time.Millisecond):
@@ -245,16 +244,15 @@ func (s *Service) RetrieveChunk(ctx context.Context, addr swarm.Address, origin 
 	return v.(swarm.Chunk), nil
 }
 
-func (s *Service) retrieveChunk(ctx context.Context, addr swarm.Address, sp *skipPeers, originated bool) (chunk swarm.Chunk, peer swarm.Address, requested bool, err error) {
+func (s *Service) retrieveChunk(ctx context.Context, addr swarm.Address, sp *skippeers.List, originated bool) (chunk swarm.Chunk, peer swarm.Address, requested bool, err error) {
 	startTimer := time.Now()
 	v := ctx.Value(requestSourceContextKey{})
-	sourcePeerAddr := swarm.Address{}
 	// allow upstream requests if this node is the source of the request
 	// i.e. the request was not forwarded, to improve retrieval
 	// if this node is the closest to he chunk but still does not contain it
 	allowUpstream := true
 	if src, ok := v.(string); ok {
-		sourcePeerAddr, err = swarm.ParseHexAddress(src)
+		sourcePeerAddr, err := swarm.ParseHexAddress(src)
 		if err == nil {
 			sp.Add(sourcePeerAddr)
 		}
@@ -270,25 +268,14 @@ func (s *Service) retrieveChunk(ctx context.Context, addr swarm.Address, sp *ski
 		return nil, peer, false, fmt.Errorf("get closest for address %s, allow upstream %v: %w", addr.String(), allowUpstream, err)
 	}
 
-	peerPO := swarm.Proximity(s.addr.Bytes(), peer.Bytes())
-
-	if !sourcePeerAddr.IsZero() {
-		// is forwarded request
-		sourceAddrPO := swarm.Proximity(sourcePeerAddr.Bytes(), addr.Bytes())
-		addrPO := swarm.Proximity(peer.Bytes(), addr.Bytes())
-
-		poGain := int(addrPO) - int(sourceAddrPO)
-
-		s.metrics.RetrieveChunkPOGainCounter.
-			WithLabelValues(strconv.Itoa(poGain)).
-			Inc()
-	}
-
 	// compute the peer's price for this chunk for price header
 	chunkPrice := s.pricer.PeerPrice(peer, addr)
 
+	creditCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
 	// Reserve to see whether we can request the chunk
-	creditAction, err := s.accounting.PrepareCredit(peer, chunkPrice, originated)
+	creditAction, err := s.accounting.PrepareCredit(creditCtx, peer, chunkPrice, originated)
 	if err != nil {
 		sp.AddOverdraft(peer)
 		return nil, peer, false, err
@@ -320,15 +307,12 @@ func (s *Service) retrieveChunk(ctx context.Context, addr swarm.Address, sp *ski
 		s.metrics.TotalErrors.Inc()
 		return nil, peer, false, fmt.Errorf("write request: %w peer %s", err, peer.String())
 	}
-
 	var d pb.Delivery
 	if err := r.ReadMsgWithContext(ctx, &d); err != nil {
 		s.metrics.TotalErrors.Inc()
 		return nil, peer, true, fmt.Errorf("read delivery: %w peer %s", err, peer.String())
 	}
-	s.metrics.RetrieveChunkPeerPOTimer.
-		WithLabelValues(strconv.Itoa(int(peerPO))).
-		Observe(time.Since(startTimer).Seconds())
+	s.metrics.ChunkRetrieveTime.Observe(time.Since(startTimer).Seconds())
 	s.metrics.TotalRetrieved.Inc()
 
 	stamp := new(postage.Stamp)
@@ -404,6 +388,9 @@ func (s *Service) closestPeer(addr swarm.Address, skipPeers []swarm.Address, all
 }
 
 func (s *Service) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (err error) {
+	ctx, cancel := context.WithTimeout(ctx, retrieveChunkTimeout)
+	defer cancel()
+
 	w, r := protobuf.NewWriterAndReader(stream)
 	defer func() {
 		if err != nil {
@@ -421,6 +408,7 @@ func (s *Service) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (e
 	defer span.Finish()
 
 	ctx = context.WithValue(ctx, requestSourceContextKey{}, p.Address.String())
+
 	addr := swarm.NewAddress(req.Addr)
 
 	forwarded := false
@@ -443,7 +431,7 @@ func (s *Service) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (e
 	}
 
 	chunkPrice := s.pricer.Price(chunk.Address())
-	debit, err := s.accounting.PrepareDebit(p.Address, chunkPrice)
+	debit, err := s.accounting.PrepareDebit(ctx, p.Address, chunkPrice)
 	if err != nil {
 		return fmt.Errorf("prepare debit to peer %s before writeback: %w", p.Address.String(), err)
 	}

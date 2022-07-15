@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/hashicorp/go-multierror"
+	"github.com/redesblock/hop/core/encryption"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/traversal"
@@ -99,6 +100,16 @@ func (s *Service) DeletePin(ctx context.Context, ref swarm.Address) error {
 	var iterErr error
 	// iterFn is a unpinning iterator function over the leaves of the root.
 	iterFn := func(leaf swarm.Address) error {
+		if len(leaf.Bytes()) == encryption.ReferenceSize {
+			// the traversal service might report back encrypted reference.
+			// this is not so trivial to mitigate inside the traversal service
+			// since it might introduce complexity with determining which entries
+			// should be treated with which address length, since the decryption keys
+			// on encrypted references are still needed for correct traversal.
+			// we therefore just make sure that localstore gets the correct reference size
+			// for unpinning.
+			leaf = swarm.NewAddress(leaf.Bytes()[:swarm.HashSize])
+		}
 		err := s.pinStorage.Set(ctx, storage.ModeSetUnpin, leaf)
 		if err != nil {
 			iterErr = multierror.Append(err, fmt.Errorf("unable to unpin the chunk for leaf %q of root %q: %w", leaf, ref, err))
@@ -135,7 +146,7 @@ func (s *Service) HasPin(ref swarm.Address) (bool, error) {
 
 // Pins implements Interface.Pins method.
 func (s *Service) Pins() ([]swarm.Address, error) {
-	var refs []swarm.Address
+	var refs = make([]swarm.Address, 0)
 	err := s.rhStorage.Iterate(storePrefix, func(key, val []byte) (stop bool, err error) {
 		var ref swarm.Address
 		if err := json.Unmarshal(val, &ref); err != nil {

@@ -33,7 +33,7 @@ type feedReferenceResponse struct {
 	Reference swarm.Address `json:"reference"`
 }
 
-func (s *server) feedGetHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Service) feedGetHandler(w http.ResponseWriter, r *http.Request) {
 	owner, err := hex.DecodeString(mux.Vars(r)["owner"])
 	if err != nil {
 		s.logger.Debugf("feed get: decode owner: %v", err)
@@ -120,7 +120,7 @@ func (s *server) feedGetHandler(w http.ResponseWriter, r *http.Request) {
 	jsonhttp.OK(w, feedReferenceResponse{Reference: ref})
 }
 
-func (s *server) feedPostHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Service) feedPostHandler(w http.ResponseWriter, r *http.Request) {
 	owner, err := hex.DecodeString(mux.Vars(r)["owner"])
 	if err != nil {
 		s.logger.Debugf("feed put: decode owner: %v", err)
@@ -137,15 +137,7 @@ func (s *server) feedPostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	batch, err := requestPostageBatchId(r)
-	if err != nil {
-		s.logger.Debugf("feed put: postage batch id: %v", err)
-		s.logger.Error("feed put: postage batch id")
-		jsonhttp.BadRequest(w, "invalid postage batch id")
-		return
-	}
-
-	putter, err := newStamperPutter(s.storer, s.post, s.signer, batch)
+	putter, wait, err := s.newStamperPutter(r)
 	if err != nil {
 		s.logger.Debugf("feed put: putter: %v", err)
 		s.logger.Error("feed put: putter")
@@ -154,6 +146,8 @@ func (s *server) feedPostHandler(w http.ResponseWriter, r *http.Request) {
 			jsonhttp.BadRequest(w, "batch not found")
 		case errors.Is(err, postage.ErrNotUsable):
 			jsonhttp.BadRequest(w, "batch not usable yet")
+		case errors.Is(err, errInvalidPostageBatch):
+			jsonhttp.BadRequest(w, "invalid postage batch id")
 		default:
 			jsonhttp.BadRequest(w, nil)
 		}
@@ -205,6 +199,13 @@ func (s *server) feedPostHandler(w http.ResponseWriter, r *http.Request) {
 			jsonhttp.InternalServerError(w, nil)
 			return
 		}
+	}
+
+	if err = wait(); err != nil {
+		s.logger.Debugf("feed upload: sync chunks: %v", err)
+		s.logger.Error("feed upload: sync chunks")
+		jsonhttp.InternalServerError(w, nil)
+		return
 	}
 
 	jsonhttp.Created(w, feedReferenceResponse{Reference: ref})

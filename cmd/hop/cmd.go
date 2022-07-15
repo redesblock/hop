@@ -41,7 +41,6 @@ const (
 	optionNameTracingPort                = "tracing-port"
 	optionNameTracingServiceName         = "tracing-service-name"
 	optionNameVerbosity                  = "verbosity"
-	optionNameGlobalPinningEnabled       = "global-pinning-enable"
 	optionNamePaymentThreshold           = "payment-threshold"
 	optionNamePaymentTolerance           = "payment-tolerance-percent"
 	optionNamePaymentEarly               = "payment-early-percent"
@@ -56,14 +55,13 @@ const (
 	optionNameSwapLegacyFactoryAddresses = "swap-legacy-factory-addresses"
 	optionNameSwapInitialDeposit         = "swap-initial-deposit"
 	optionNameSwapEnable                 = "swap-enable"
+	optionNameChequebookEnable           = "chequebook-enable"
 	optionNameTransactionHash            = "transaction"
 	optionNameBlockHash                  = "block-hash"
 	optionNameSwapDeploymentGasPrice     = "swap-deployment-gas-price"
 	optionNameFullNode                   = "full-node"
 	optionNamePostageContractAddress     = "postage-stamp-address"
 	optionNamePriceOracleAddress         = "price-oracle-address"
-	optionNamePledgeAddress              = "pledge-address"
-	optionNameRewardAddress              = "reward-address"
 	optionNameBlockTime                  = "block-time"
 	optionWarmUpTime                     = "warmup-time"
 	optionNameMainNet                    = "mainnet"
@@ -78,6 +76,9 @@ const (
 	optionNameRestrictedAPI              = "restricted"
 	optionNameTokenEncryptionKey         = "token-encryption-key"
 	optionNameAdminPasswordHash          = "admin-password"
+	optionNameUsePostageSnapshot         = "use-postage-snapshot"
+	optionNamePledgeAddress              = "pledge-address"
+	optionNameRewardAddress              = "reward-address"
 	optionNameReceiptEndpoint            = "receipt-endpoint"
 )
 
@@ -123,6 +124,10 @@ func newCommand(opts ...option) (c *command, err error) {
 	c.initGlobalFlags()
 
 	if err := c.initStartCmd(); err != nil {
+		return nil, err
+	}
+
+	if err := c.initHasherCmd(); err != nil {
 		return nil, err
 	}
 
@@ -239,7 +244,7 @@ func (c *command) setAllFlags(cmd *cobra.Command) {
 	cmd.Flags().String(optionNameP2PAddr, ":1634", "P2P listen address")
 	cmd.Flags().String(optionNameNATAddr, "", "NAT exposed address")
 	cmd.Flags().Bool(optionNameP2PWSEnable, false, "enable P2P WebSocket transport")
-	cmd.Flags().StringSlice(optionNameBootnodes, []string{"/dnsaddr/testnet.ethswarm.org"}, "initial nodes to connect to")
+	cmd.Flags().StringSlice(optionNameBootnodes, []string{""}, "initial nodes to connect to")
 	cmd.Flags().Bool(optionNameDebugAPIEnable, false, "enable debug HTTP API")
 	cmd.Flags().String(optionNameDebugAPIAddr, ":1635", "debug HTTP API listen address")
 	cmd.Flags().Uint64(optionNameNetworkID, 10, "ID of the Swarm network")
@@ -251,8 +256,7 @@ func (c *command) setAllFlags(cmd *cobra.Command) {
 	cmd.Flags().String(optionNameTracingServiceName, "hop", "service name identifier for tracing")
 	cmd.Flags().String(optionNameVerbosity, "info", "log verbosity level 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=trace")
 	cmd.Flags().String(optionWelcomeMessage, "", "send a welcome message string during handshakes")
-	cmd.Flags().Bool(optionNameGlobalPinningEnabled, false, "enable global pinning")
-	cmd.Flags().String(optionNamePaymentThreshold, "100000000", "threshold where you expect to get paid from your peers")
+	cmd.Flags().String(optionNamePaymentThreshold, "100000000", "threshold in HOP where you expect to get paid from your peers")
 	cmd.Flags().Int64(optionNamePaymentTolerance, 25, "excess debt above payment threshold in percentages where you disconnect from your peer")
 	cmd.Flags().Int64(optionNamePaymentEarly, 50, "percentage below the peers payment threshold when we initiate settlement")
 	cmd.Flags().StringSlice(optionNameResolverEndpoints, []string{}, "ENS compatible API endpoint for a TLD and with contract address, can be repeated, format [tld:][contract-addr@]url")
@@ -261,22 +265,21 @@ func (c *command) setAllFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool(optionNameClefSignerEnable, false, "enable clef signer")
 	cmd.Flags().String(optionNameClefSignerEndpoint, "", "clef signer endpoint")
 	cmd.Flags().String(optionNameClefSignerEthereumAddress, "", "ethereum address to use from clef signer")
-	cmd.Flags().String(optionNameSwapEndpoint, "ws://localhost:8546", "swap ethereum blockchain endpoint")
+	cmd.Flags().String(optionNameSwapEndpoint, "", "swap ethereum blockchain endpoint")
 	cmd.Flags().String(optionNameSwapFactoryAddress, "", "swap factory addresses")
 	cmd.Flags().StringSlice(optionNameSwapLegacyFactoryAddresses, nil, "legacy swap factory addresses")
 	cmd.Flags().String(optionNameSwapInitialDeposit, "10000000000000000", "initial deposit if deploying a new chequebook")
 	cmd.Flags().Bool(optionNameSwapEnable, true, "enable swap")
+	cmd.Flags().Bool(optionNameChequebookEnable, true, "enable chequebook")
 	cmd.Flags().Bool(optionNameFullNode, false, "cause the node to start in full mode")
 	cmd.Flags().String(optionNamePostageContractAddress, "", "postage stamp contract address")
 	cmd.Flags().String(optionNamePriceOracleAddress, "", "price oracle contract address")
-	cmd.Flags().String(optionNamePledgeAddress, "", "pledge contract address")
-	cmd.Flags().String(optionNameRewardAddress, "", "reward contract address")
 	cmd.Flags().String(optionNameTransactionHash, "", "proof-of-identity transaction hash")
 	cmd.Flags().String(optionNameBlockHash, "", "block hash of the block whose parent is the block that contains the transaction hash")
-	cmd.Flags().Uint64(optionNameBlockTime, 3, "chain block time")
+	cmd.Flags().Uint64(optionNameBlockTime, 15, "chain block time")
 	cmd.Flags().String(optionNameSwapDeploymentGasPrice, "", "gas price in wei to use for deployment and funding")
-	cmd.Flags().Duration(optionWarmUpTime, time.Minute*20, "time to warmup the node before pull/push protocols can be kicked off.")
-	cmd.Flags().Bool(optionNameMainNet, false, "triggers connect to main net bootnodes.")
+	cmd.Flags().Duration(optionWarmUpTime, time.Minute*5, "time to warmup the node before some major protocols can be kicked off.")
+	cmd.Flags().Bool(optionNameMainNet, true, "triggers connect to main net bootnodes.")
 	cmd.Flags().Bool(optionNameRetrievalCaching, true, "enable forwarded content caching")
 	cmd.Flags().Bool(optionNameResync, false, "forces the node to resync postage contract data")
 	cmd.Flags().Bool(optionNamePProfBlock, false, "enable pprof block profile")
@@ -286,6 +289,7 @@ func (c *command) setAllFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool(optionNameRestrictedAPI, false, "enable permission check on the http APIs")
 	cmd.Flags().String(optionNameTokenEncryptionKey, "", "admin username to get the security token")
 	cmd.Flags().String(optionNameAdminPasswordHash, "", "bcrypt hash of the admin password to get the security token")
+	cmd.Flags().Bool(optionNameUsePostageSnapshot, false, "bootstrap node using postage snapshot from the network")
 	cmd.Flags().String(optionNameReceiptEndpoint, "http://34.96.221.250:8080", "receipt server")
 }
 

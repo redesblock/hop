@@ -112,6 +112,8 @@ func (s *Service) Protocol() p2p.ProtocolSpec {
 	}
 }
 
+var ErrShutdownInProgress = errors.New("shutdown in progress")
+
 func (s *Service) BroadcastPeers(ctx context.Context, addressee swarm.Address, peers ...swarm.Address) error {
 	max := maxBatchSize
 	s.metrics.BroadcastPeers.Inc()
@@ -125,6 +127,12 @@ func (s *Service) BroadcastPeers(ctx context.Context, addressee swarm.Address, p
 		// If broadcasting limit is exceeded, return early
 		if !s.outLimiter.Allow(addressee.ByteString(), max) {
 			return nil
+		}
+
+		select {
+		case <-s.quit:
+			return ErrShutdownInProgress
+		default:
 		}
 
 		if err := s.sendPeers(ctx, addressee, peers[:max]); err != nil {

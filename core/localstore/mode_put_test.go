@@ -12,6 +12,7 @@ import (
 
 	"github.com/redesblock/hop/core/postage"
 	postagetesting "github.com/redesblock/hop/core/postage/testing"
+	"github.com/redesblock/hop/core/sharky"
 	"github.com/redesblock/hop/core/shed"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
@@ -247,6 +248,84 @@ func TestModePutUpload(t *testing.T) {
 			newIndexGCSizeTest(db)(t)
 		})
 	}
+}
+
+// TestModePutSyncUpload_SameIndex tests that write-in-place for chunk
+// with same postage batch index and later timestamp works as expected.
+func TestModePutSyncUpload_SameIndex(t *testing.T) {
+	db := newTestDB(t, nil)
+
+	wantTimestamp := time.Now().UTC().UnixNano()
+	defer setNow(func() (t int64) {
+		return wantTimestamp
+	})()
+
+	chunks := generateTestRandomChunks(2)
+
+	// this overrides the second chunk's stamp data with the first one's
+	copy(chunks[1].Stamp().Index(), chunks[0].Stamp().Index())
+	copy(chunks[1].Stamp().BatchID(), chunks[0].Stamp().BatchID())
+
+	ts := binary.BigEndian.Uint64(chunks[0].Stamp().Timestamp()) + 1
+	tsB := make([]byte, 8)
+	binary.BigEndian.PutUint64(tsB, ts)
+	copy(chunks[1].Stamp().Timestamp(), tsB) // modify the timestamp so that it always appears as "later"
+
+	t.Logf("po 0 %d po 1 %d", db.po(chunks[0].Address()), db.po(chunks[1].Address()))
+	// call unreserve on the batch with radius 0 so that
+	// localstore is aware of the batch and the chunk can
+	// be inserted into the database
+	unreserveChunkBatch(t, db, 0, chunks...)
+
+	_, err := db.Put(context.Background(), storage.ModePutSync, chunks[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Put(context.Background(), storage.ModePutUpload, chunks[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Set(context.Background(), storage.ModeSetSync, chunks[1].Address()); err != nil {
+		t.Fatal(err)
+	}
+
+	yes, err := db.retrievalDataIndex.Has(chunkToItem(chunks[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if yes {
+		t.Fatal("chunk should not be there")
+	}
+	yes, err = db.retrievalDataIndex.Has(chunkToItem(chunks[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !yes {
+		t.Fatal("chunk should be there")
+	}
+
+	out, err := db.retrievalDataIndex.Get(chunkToItem(chunks[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	validateData(t, db, out, chunks[1].Data())
+
+	binIDs := make(map[uint8]uint64)
+
+	for _, ch := range chunks {
+		po := db.po(ch.Address())
+		binIDs[po]++
+	}
+
+	newItemsCountTest(db.retrievalDataIndex, 1)(t)
+	newPullIndexTest(db, chunks[1], binIDs[db.po(chunks[1].Address())], nil)(t)
+	newPinIndexTest(db, chunks[0], leveldb.ErrNotFound)(t)
+	newPinIndexTest(db, chunks[1], nil)(t)
+	newItemsCountTest(db.pullIndex, 1)(t)
+	newItemsCountTest(db.postageIndexIndex, 1)(t)
+	newIndexGCSizeTest(db)(t)
 }
 
 // TestModePutUploadPin validates ModePutUploadPin index values on the provided DB.
@@ -654,6 +733,18 @@ func TestPutDuplicateChunks(t *testing.T) {
 				t.Errorf("got chunk address %s, want %s", got.Address(), ch.Address())
 			}
 		})
+	}
+}
+
+func TestReleaseLocations(t *testing.T) {
+	locs := new(releaseLocations)
+
+	for i := 0; i < 5; i++ {
+		locs.add(sharky.Location{Shard: 0, Slot: 100, Length: 100})
+	}
+
+	if len(*locs) != 5 {
+		t.Fatal("incorrect length of release locations expected", 5, "found", len(*locs))
 	}
 }
 

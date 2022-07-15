@@ -15,6 +15,7 @@ import (
 
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/postage"
+	"github.com/redesblock/hop/core/sharky"
 	"github.com/redesblock/hop/core/shed"
 	"github.com/redesblock/hop/core/storage"
 	chunktesting "github.com/redesblock/hop/core/storage/testing"
@@ -131,6 +132,78 @@ func TestDB_updateGCSem(t *testing.T) {
 	}
 }
 
+// TestParallelPutAndGet validates that the integrity of the chunks in
+// concurrent operations is preserved.
+func TestParallelPutAndGet(t *testing.T) {
+	db := newTestDB(t, nil)
+
+	ctx := context.Background()
+
+	chunkCount := 1000
+	writeWorkerCount := 10
+
+	chunks := make([]swarm.Chunk, 0, chunkCount)
+	var chunksMu sync.Mutex
+	var writeWG sync.WaitGroup
+
+	for worker := 0; worker < writeWorkerCount; worker++ {
+		writeWG.Add(1)
+		go func() {
+			defer writeWG.Done()
+
+			for i := 0; i < chunkCount/writeWorkerCount; i++ {
+				ch := generateTestRandomChunk()
+				_, err := db.Put(ctx, storage.ModePutUpload, ch)
+				if err != nil {
+					t.Error(err)
+				}
+
+				chunksMu.Lock()
+				chunks = append(chunks, ch)
+				chunksMu.Unlock()
+			}
+		}()
+	}
+
+	writeWG.Wait()
+
+	var readWG sync.WaitGroup
+
+	readWorkerCount := 10
+
+	for worker := 0; worker < readWorkerCount; worker++ {
+		readWG.Add(1)
+		go func() {
+			defer readWG.Done()
+
+			random := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+			for i := 0; i < chunkCount; i++ {
+				n := random.Int63n(int64(chunkCount))
+				ch := chunks[n]
+
+				chData := ch.Data()
+
+				got, err := db.Get(ctx, storage.ModeGetRequest, ch.Address())
+				if err != nil {
+					t.Error(err)
+				}
+
+				gotData := got.Data()
+
+				if !bytes.Equal(gotData, chData) {
+					if !ch.Address().Equal(got.Address()) {
+						t.Errorf("got address %s, want %s", got.Address(), ch.Address())
+					}
+					t.Errorf("chunk %s: got data %x, want %x", ch.Address(), gotData, chData)
+				}
+			}
+		}()
+	}
+
+	readWG.Wait()
+}
+
 // newTestDB is a helper function that constructs a
 // temporary database and returns a cleanup function that must
 // be called to remove the data.
@@ -140,6 +213,14 @@ func newTestDB(t testing.TB, o *Options) *DB {
 	baseKey := make([]byte, 32)
 	if _, err := rand.Read(baseKey); err != nil {
 		t.Fatal(err)
+	}
+	if o == nil {
+		o = &Options{}
+	}
+	if o.UnreserveFunc == nil {
+		o.UnreserveFunc = func(postage.UnreserveIteratorFn) error {
+			return nil
+		}
 	}
 	logger := logging.New(io.Discard, 0)
 	db, err := New("", baseKey, nil, o, logger)
@@ -237,7 +318,8 @@ func newRetrieveIndexesTest(db *DB, chunk swarm.Chunk, storeTimestamp, accessTim
 		if err != nil {
 			t.Fatal(err)
 		}
-		validateItem(t, item, chunk.Address().Bytes(), chunk.Data(), storeTimestamp, 0, chunk.Stamp())
+		validateItem(t, item, chunk.Address().Bytes(), storeTimestamp, 0, chunk.Stamp())
+		validateData(t, db, item, chunk.Data())
 
 		// access index should not be set
 		wantErr := leveldb.ErrNotFound
@@ -265,7 +347,8 @@ func newRetrieveIndexesTestWithAccess(db *DB, ch swarm.Chunk, storeTimestamp, ac
 				t.Fatal(err)
 			}
 		}
-		validateItem(t, item, ch.Address().Bytes(), ch.Data(), storeTimestamp, accessTimestamp, ch.Stamp())
+		validateItem(t, item, ch.Address().Bytes(), storeTimestamp, accessTimestamp, ch.Stamp())
+		validateData(t, db, item, ch.Data())
 	}
 }
 
@@ -283,7 +366,7 @@ func newPullIndexTest(db *DB, ch swarm.Chunk, binID uint64, wantError error) fun
 			t.Errorf("got error %v, want %v", err, wantError)
 		}
 		if err == nil {
-			validateItem(t, item, ch.Address().Bytes(), nil, 0, 0, postage.NewStamp(ch.Stamp().BatchID(), nil, nil, nil))
+			validateItem(t, item, ch.Address().Bytes(), 0, 0, postage.NewStamp(ch.Stamp().BatchID(), nil, nil, nil))
 		}
 	}
 }
@@ -302,7 +385,7 @@ func newPushIndexTest(db *DB, ch swarm.Chunk, storeTimestamp int64, wantError er
 			t.Errorf("got error %v, want %v", err, wantError)
 		}
 		if err == nil {
-			validateItem(t, item, ch.Address().Bytes(), nil, storeTimestamp, 0, postage.NewStamp(nil, nil, nil, nil))
+			validateItem(t, item, ch.Address().Bytes(), storeTimestamp, 0, postage.NewStamp(nil, nil, nil, nil))
 		}
 	}
 }
@@ -322,7 +405,7 @@ func newGCIndexTest(db *DB, chunk swarm.Chunk, storeTimestamp, accessTimestamp i
 			t.Errorf("got error %v, want %v", err, wantError)
 		}
 		if err == nil {
-			validateItem(t, item, chunk.Address().Bytes(), nil, 0, accessTimestamp, stamp)
+			validateItem(t, item, chunk.Address().Bytes(), 0, accessTimestamp, stamp)
 		}
 	}
 }
@@ -340,7 +423,7 @@ func newPinIndexTest(db *DB, chunk swarm.Chunk, wantError error) func(t *testing
 			t.Errorf("got error %v, want %v", err, wantError)
 		}
 		if err == nil {
-			validateItem(t, item, chunk.Address().Bytes(), nil, 0, 0, postage.NewStamp(nil, nil, nil, nil))
+			validateItem(t, item, chunk.Address().Bytes(), 0, 0, postage.NewStamp(nil, nil, nil, nil))
 		}
 	}
 }
@@ -365,7 +448,7 @@ func newItemsCountTest(i shed.Index, want int) func(t *testing.T) {
 	}
 }
 
-// newIndexGCSizeTest retruns a test function that validates if DB.gcSize
+// newIndexGCSizeTest returns a test function that validates if DB.gcSize
 // value is the same as the number of items in DB.gcIndex.
 func newIndexGCSizeTest(db *DB) func(t *testing.T) {
 	return func(t *testing.T) {
@@ -385,6 +468,22 @@ func newIndexGCSizeTest(db *DB) func(t *testing.T) {
 		}
 		if got != want {
 			t.Errorf("got gc size %v, want %v", got, want)
+		}
+	}
+}
+
+// reserveSizeTest checks that the reserveSize scalar is equal
+// to the expected value.
+func reserveSizeTest(db *DB, want uint64) func(t *testing.T) {
+	return func(t *testing.T) {
+		t.Helper()
+
+		got, err := db.reserveSize.Get()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("got reserve size %v, want %v", got, want)
 		}
 	}
 }
@@ -423,14 +522,11 @@ func testItemsOrder(t *testing.T, i shed.Index, chunks []testIndexChunk, sortFun
 }
 
 // validateItem is a helper function that checks Item values.
-func validateItem(t *testing.T, item shed.Item, address, data []byte, storeTimestamp, accessTimestamp int64, stamp swarm.Stamp) {
+func validateItem(t *testing.T, item shed.Item, address []byte, storeTimestamp, accessTimestamp int64, stamp swarm.Stamp) {
 	t.Helper()
 
 	if !bytes.Equal(item.Address, address) {
 		t.Errorf("got item address %x, want %x", item.Address, address)
-	}
-	if !bytes.Equal(item.Data, data) {
-		t.Errorf("got item data %x, want %x", item.Data, data)
 	}
 	if item.StoreTimestamp != storeTimestamp {
 		t.Errorf("got item store timestamp %v, want %v", item.StoreTimestamp, storeTimestamp)
@@ -443,6 +539,23 @@ func validateItem(t *testing.T, item shed.Item, address, data []byte, storeTimes
 	}
 	if !bytes.Equal(item.Sig, stamp.Sig()) {
 		t.Errorf("got signature %x, want %x", item.Sig, stamp.Sig())
+	}
+}
+
+func validateData(t *testing.T, db *DB, item shed.Item, data []byte) {
+	t.Helper()
+
+	loc, err := sharky.LocationFromBinary(item.Location)
+	if err != nil {
+		t.Fatal("failed reading sharky location", err)
+	}
+	buf := make([]byte, loc.Length)
+	err = db.sharky.Read(context.TODO(), loc, buf)
+	if err != nil {
+		t.Fatal("failed reading data from sharky", err)
+	}
+	if !bytes.Equal(buf, data) {
+		t.Errorf("got item data %x, want %x", buf, data)
 	}
 }
 

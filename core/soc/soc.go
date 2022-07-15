@@ -11,12 +11,6 @@ import (
 	"github.com/redesblock/hop/core/swarm"
 )
 
-const (
-	IdSize        = 32
-	SignatureSize = 65
-	minChunkSize  = IdSize + SignatureSize + swarm.SpanSize
-)
-
 var (
 	errInvalidAddress = errors.New("soc: invalid address")
 	errWrongChunkSize = errors.New("soc: chunk length is less than minimum")
@@ -120,7 +114,7 @@ func (s *SOC) Sign(signer crypto.Signer) (swarm.Chunk, error) {
 // FromChunk recreates a SOC representation from swarm.Chunk data.
 func FromChunk(sch swarm.Chunk) (*SOC, error) {
 	chunkData := sch.Data()
-	if len(chunkData) < minChunkSize {
+	if len(chunkData) < swarm.SocMinChunkSize {
 		return nil, errWrongChunkSize
 	}
 
@@ -128,11 +122,11 @@ func FromChunk(sch swarm.Chunk) (*SOC, error) {
 	s := &SOC{}
 	cursor := 0
 
-	s.id = chunkData[cursor:IdSize]
-	cursor += IdSize
+	s.id = chunkData[cursor:swarm.HashSize]
+	cursor += swarm.HashSize
 
-	s.signature = chunkData[cursor : cursor+SignatureSize]
-	cursor += SignatureSize
+	s.signature = chunkData[cursor : cursor+swarm.SocSignatureSize]
+	cursor += swarm.SocSignatureSize
 
 	ch, err := cac.NewWithDataSpan(chunkData[cursor:])
 	if err != nil {

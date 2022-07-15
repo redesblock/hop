@@ -220,6 +220,7 @@ func TestReceiveCheque(t *testing.T) {
 		networkID,
 		&cashoutMock{},
 		observer,
+		common.Address{},
 	)
 
 	err := swap.ReceiveCheque(context.Background(), peer, cheque, exchangeRate, deduction)
@@ -293,6 +294,7 @@ func TestReceiveChequeReject(t *testing.T) {
 		networkID,
 		&cashoutMock{},
 		observer,
+		common.Address{},
 	)
 
 	err := swap.ReceiveCheque(context.Background(), peer, cheque, exchangeRate, deduction)
@@ -348,6 +350,7 @@ func TestReceiveChequeWrongChequebook(t *testing.T) {
 		networkID,
 		&cashoutMock{},
 		observer,
+		common.Address{},
 	)
 
 	err := swapService.ReceiveCheque(context.Background(), peer, cheque, exchangeRate, deduction)
@@ -411,6 +414,7 @@ func TestPay(t *testing.T) {
 		networkID,
 		&cashoutMock{},
 		observer,
+		common.Address{},
 	)
 
 	swap.Pay(context.Background(), peer, amount)
@@ -453,6 +457,7 @@ func TestPayIssueError(t *testing.T) {
 		networkID,
 		&cashoutMock{},
 		nil,
+		common.Address{},
 	)
 
 	observer := newTestObserver()
@@ -503,6 +508,7 @@ func TestPayUnknownBeneficiary(t *testing.T) {
 		networkID,
 		&cashoutMock{},
 		observer,
+		common.Address{},
 	)
 
 	swapService.Pay(context.Background(), peer, amount)
@@ -556,6 +562,7 @@ func TestHandshake(t *testing.T) {
 		networkID,
 		&cashoutMock{},
 		nil,
+		common.Address{},
 	)
 
 	err := swapService.Handshake(peer, beneficiary)
@@ -602,6 +609,7 @@ func TestHandshakeNewPeer(t *testing.T) {
 		networkID,
 		&cashoutMock{},
 		nil,
+		common.Address{},
 	)
 
 	err := swapService.Handshake(peer, beneficiary)
@@ -640,6 +648,7 @@ func TestMigratePeer(t *testing.T) {
 		networkID,
 		&cashoutMock{},
 		nil,
+		common.Address{},
 	)
 
 	err := swapService.Handshake(peer, beneficiary)
@@ -669,11 +678,7 @@ func TestCashout(t *testing.T) {
 		&swapProtocolMock{},
 		logger,
 		store,
-		mockchequebook.NewChequebook(
-			mockchequebook.WithChequebookAddressFunc(func() common.Address {
-				return ourChequebookAddress
-			}),
-		),
+		mockchequebook.NewChequebook(),
 		mockchequestore.NewChequeStore(),
 		addressbook,
 		uint64(1),
@@ -689,6 +694,7 @@ func TestCashout(t *testing.T) {
 			},
 		},
 		nil,
+		ourChequebookAddress,
 	)
 
 	returnedHash, err := swapService.CashCheque(context.Background(), peer)
@@ -735,6 +741,7 @@ func TestCashoutStatus(t *testing.T) {
 			},
 		},
 		nil,
+		common.Address{},
 	)
 
 	returnedStatus, err := swapService.CashoutStatus(context.Background(), peer)

@@ -3,7 +3,6 @@ package localstore
 import (
 	"io"
 	"math/rand"
-	"os"
 	"strings"
 	"testing"
 
@@ -32,11 +31,7 @@ func TestOneMigration(t *testing.T) {
 		}},
 	}
 
-	dir, err := os.MkdirTemp("", "localstore-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 	baseKey := make([]byte, 32)
 	if _, err := rand.Read(baseKey); err != nil {
 		t.Fatal(err)
@@ -73,11 +68,11 @@ func TestOneMigration(t *testing.T) {
 	}
 
 	if !ran {
-		t.Errorf("expected migration did not run")
+		t.Error("expected migration did not run")
 	}
 
 	if shouldNotRun {
-		t.Errorf("migration ran but shouldnt have")
+		t.Error("migration ran but shouldnt have")
 	}
 
 	err = db.Close()
@@ -120,11 +115,7 @@ func TestManyMigrations(t *testing.T) {
 		}},
 	}
 
-	dir, err := os.MkdirTemp("", "localstore-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 	baseKey := make([]byte, 32)
 	if _, err := rand.Read(baseKey); err != nil {
 		t.Fatal(err)
@@ -160,7 +151,7 @@ func TestManyMigrations(t *testing.T) {
 	}
 
 	if shouldNotRun {
-		t.Errorf("migration ran but shouldnt have")
+		t.Error("migration ran but shouldnt have")
 	}
 
 	for i, v := range executionOrder {
@@ -200,11 +191,7 @@ func TestMigrationErrorFrom(t *testing.T) {
 		}},
 	}
 
-	dir, err := os.MkdirTemp("", "localstore-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 	baseKey := make([]byte, 32)
 	if _, err := rand.Read(baseKey); err != nil {
 		t.Fatal(err)
@@ -231,7 +218,7 @@ func TestMigrationErrorFrom(t *testing.T) {
 	}
 
 	if shouldNotRun {
-		t.Errorf("migration ran but shouldnt have")
+		t.Error("migration ran but shouldnt have")
 	}
 }
 
@@ -260,11 +247,7 @@ func TestMigrationErrorTo(t *testing.T) {
 		}},
 	}
 
-	dir, err := os.MkdirTemp("", "localstore-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 	baseKey := make([]byte, 32)
 	if _, err := rand.Read(baseKey); err != nil {
 		t.Fatal(err)
@@ -292,6 +275,6 @@ func TestMigrationErrorTo(t *testing.T) {
 	}
 
 	if shouldNotRun {
-		t.Errorf("migration ran but shouldnt have")
+		t.Error("migration ran but shouldnt have")
 	}
 }

@@ -1,7 +1,6 @@
 package leveldb_test
 
 import (
-	"os"
 	"testing"
 
 	"github.com/redesblock/hop/core/statestore/leveldb"
@@ -11,15 +10,7 @@ import (
 
 func TestPersistentStateStore(t *testing.T) {
 	test.Run(t, func(t *testing.T) storage.StateStorer {
-		dir, err := os.MkdirTemp("", "statestore_test")
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			if err := os.RemoveAll(dir); err != nil {
-				t.Fatal(err)
-			}
-		})
+		dir := t.TempDir()
 
 		store, err := leveldb.NewStateStore(dir, nil)
 		if err != nil {
@@ -45,15 +36,7 @@ func TestPersistentStateStore(t *testing.T) {
 }
 
 func TestGetSchemaName(t *testing.T) {
-	dir, err := os.MkdirTemp("", "statestore_test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := os.RemoveAll(dir); err != nil {
-			t.Fatal(err)
-		}
-	})
+	dir := t.TempDir()
 
 	store, err := leveldb.NewStateStore(dir, nil)
 	if err != nil {

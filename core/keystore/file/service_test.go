@@ -1,7 +1,6 @@
 package file_test
 
 import (
-	"os"
 	"testing"
 
 	"github.com/redesblock/hop/core/keystore/file"
@@ -9,11 +8,7 @@ import (
 )
 
 func TestService(t *testing.T) {
-	dir, err := os.MkdirTemp("", "hop-keystore-file-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	test.Service(t, file.New(dir))
 }

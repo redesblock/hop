@@ -3,8 +3,11 @@ package localstore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
+	"github.com/hashicorp/go-multierror"
+	"github.com/redesblock/hop/core/sharky"
 	"github.com/redesblock/hop/core/shed"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
@@ -19,7 +22,7 @@ import (
 func (db *DB) Set(ctx context.Context, mode storage.ModeSet, addrs ...swarm.Address) (err error) {
 	db.metrics.ModeSet.Inc()
 	defer totalTimeMetric(db.metrics.TotalTimeSet, time.Now())
-	err = db.set(mode, addrs...)
+	err = db.set(ctx, mode, addrs...)
 	if err != nil {
 		db.metrics.ModeSetFailure.Inc()
 	}
@@ -28,7 +31,7 @@ func (db *DB) Set(ctx context.Context, mode storage.ModeSet, addrs ...swarm.Addr
 
 // set updates database indexes for
 // chunks represented by provided addresses.
-func (db *DB) set(mode storage.ModeSet, addrs ...swarm.Address) (err error) {
+func (db *DB) set(ctx context.Context, mode storage.ModeSet, addrs ...swarm.Address) (err error) {
 	// protect parallel updates
 	db.batchMu.Lock()
 	defer db.batchMu.Unlock()
@@ -37,30 +40,44 @@ func (db *DB) set(mode storage.ModeSet, addrs ...swarm.Address) (err error) {
 	}
 
 	batch := new(leveldb.Batch)
+	var committedLocations []sharky.Location
 
 	// variables that provide information for operations
 	// to be done after write batch function successfully executes
-	var gcSizeChange int64                      // number to add or subtract from gcSize
+	var (
+		gcSizeChange      int64 // number to add or subtract from gcSize
+		reserveSizeChange int64 // number of items to add or subtract from reserveSize
+	)
 	triggerPullFeed := make(map[uint8]struct{}) // signal pull feed subscriptions to iterate
 
 	switch mode {
 
 	case storage.ModeSetSync:
 		for _, addr := range addrs {
-			c, err := db.setSync(batch, addr)
+			c, r, err := db.setSync(batch, addr)
 			if err != nil {
 				return err
 			}
 			gcSizeChange += c
+			reserveSizeChange += r
 		}
 
 	case storage.ModeSetRemove:
 		for _, addr := range addrs {
 			item := addressToItem(addr)
+			item, err = db.retrievalDataIndex.Get(item)
+			if err != nil {
+				return err
+			}
 			c, err := db.setRemove(batch, item, true)
 			if err != nil {
 				return err
 			}
+			l, err := sharky.LocationFromBinary(item.Location)
+			if err != nil {
+				return err
+			}
+			committedLocations = append(committedLocations, l)
 			gcSizeChange += c
 		}
 
@@ -90,10 +107,24 @@ func (db *DB) set(mode storage.ModeSet, addrs ...swarm.Address) (err error) {
 		return err
 	}
 
+	err = db.incReserveSizeInBatch(batch, reserveSizeChange)
+	if err != nil {
+		return err
+	}
+
 	err = db.shed.WriteBatch(batch)
 	if err != nil {
 		return err
 	}
+
+	sharkyErr := new(multierror.Error)
+	for _, l := range committedLocations {
+		sharkyErr = multierror.Append(sharkyErr, db.sharky.Release(ctx, l))
+	}
+	if sharkyErr.ErrorOrNil() != nil {
+		return sharkyErr.ErrorOrNil()
+	}
+
 	for po := range triggerPullFeed {
 		db.triggerPullSubscriptions(po)
 	}
@@ -105,7 +136,7 @@ func (db *DB) set(mode storage.ModeSet, addrs ...swarm.Address) (err error) {
 //   from push sync index
 // - update to gc index happens given item does not exist in pin index
 // Provided batch is updated.
-func (db *DB) setSync(batch *leveldb.Batch, addr swarm.Address) (gcSizeChange int64, err error) {
+func (db *DB) setSync(batch *leveldb.Batch, addr swarm.Address) (gcSizeChange, reserveSizeChange int64, err error) {
 	item := addressToItem(addr)
 
 	// need to get access timestamp here as it is not
@@ -121,11 +152,11 @@ func (db *DB) setSync(batch *leveldb.Batch, addr swarm.Address) (gcSizeChange in
 			// if it is there
 			err = db.pushIndex.DeleteInBatch(batch, item)
 			if err != nil {
-				return 0, err
+				return 0, 0, err
 			}
-			return 0, nil
+			return 0, 0, nil
 		}
-		return 0, err
+		return 0, 0, err
 	}
 	item.StoreTimestamp = i.StoreTimestamp
 	item.BinID = i.BinID
@@ -141,7 +172,7 @@ func (db *DB) setSync(batch *leveldb.Batch, addr swarm.Address) (gcSizeChange in
 			// but this function is called with ModeSetSync
 			db.logger.Debugf("localstore: chunk with address %s not found in push index", addr)
 		} else {
-			return 0, err
+			return 0, 0, err
 		}
 	}
 	if err == nil && db.tags != nil && i.Tag != 0 {
@@ -153,25 +184,25 @@ func (db *DB) setSync(batch *leveldb.Batch, addr swarm.Address) (gcSizeChange in
 		} else {
 			err = t.Inc(tags.StateSynced)
 			if err != nil {
-				return 0, err
+				return 0, 0, err
 			}
 		}
 	}
 
 	err = db.pushIndex.DeleteInBatch(batch, item)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
 	i1, err := db.retrievalAccessIndex.Get(item)
 	if err != nil {
 		if !errors.Is(err, leveldb.ErrNotFound) {
-			return 0, err
+			return 0, 0, err
 		}
 		item.AccessTimestamp = now()
 		err := db.retrievalAccessIndex.PutInBatch(batch, item)
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 	} else {
 		item.AccessTimestamp = i1.AccessTimestamp
@@ -193,7 +224,8 @@ func (db *DB) setRemove(batch *leveldb.Batch, item shed.Item, check bool) (gcSiz
 			return 0, err
 		}
 	}
-	if item.StoreTimestamp == 0 {
+
+	if item.StoreTimestamp == 0 || item.Location == nil {
 		item, err = db.retrievalDataIndex.Get(item)
 		if err != nil {
 			return 0, err
@@ -299,7 +331,7 @@ func (db *DB) setUnpin(batch *leveldb.Batch, addr swarm.Address) (gcSizeChange i
 	// Get the existing pin counter of the chunk
 	i, err := db.pinIndex.Get(item)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("get pin index: %w", err)
 	}
 	item.PinCounter = i.PinCounter
 	// Decrement the pin counter or
@@ -317,21 +349,27 @@ func (db *DB) setUnpin(batch *leveldb.Batch, addr swarm.Address) (gcSizeChange i
 	}
 	i, err = db.retrievalDataIndex.Get(item)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("get retrieval data index: %w", err)
 	}
 	item.StoreTimestamp = i.StoreTimestamp
 	item.BinID = i.BinID
 	item.BatchID = i.BatchID
 	i, err = db.pushIndex.Get(item)
-	if !errors.Is(err, leveldb.ErrNotFound) {
-		// err is either nil or not leveldb.ErrNotFound
-		return 0, err
+	switch {
+	case err == nil:
+		// this is a bit odd, but we return a nil here, causing the pending batch to
+		// be written to leveldb, removing the item from the pin index, but not moving it to
+		// the gc index because it still exists in the push index.
+		return 0, nil
+	case !errors.Is(err, leveldb.ErrNotFound):
+		// err is not leveldb.ErrNotFound
+		return 0, fmt.Errorf("get push index: %w", err)
 	}
 
 	i, err = db.retrievalAccessIndex.Get(item)
 	if err != nil {
 		if !errors.Is(err, leveldb.ErrNotFound) {
-			return 0, err
+			return 0, fmt.Errorf("get retrieval access index: %w", err)
 		}
 		item.AccessTimestamp = now()
 		err = db.retrievalAccessIndex.PutInBatch(batch, item)

@@ -14,7 +14,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const optionNameForgetOverlay = "forget-overlay"
+const (
+	optionNameForgetOverlay = "forget-overlay"
+	optionNameForgetStamps  = "forget-stamps"
+)
 
 func (c *command) initDBCmd() {
 	cmd := &cobra.Command{
@@ -25,8 +28,61 @@ func (c *command) initDBCmd() {
 	dbExportCmd(cmd)
 	dbImportCmd(cmd)
 	dbNukeCmd(cmd)
+	dbIndicesCmd(cmd)
 
 	c.root.AddCommand(cmd)
+}
+
+func dbIndicesCmd(cmd *cobra.Command) {
+	c := &cobra.Command{
+		Use:   "indices",
+		Short: "Prints the DB indices",
+		RunE: func(cmd *cobra.Command, args []string) (err error) {
+			start := time.Now()
+			v, err := cmd.Flags().GetString(optionNameVerbosity)
+			if err != nil {
+				return fmt.Errorf("get verbosity: %w", err)
+			}
+			v = strings.ToLower(v)
+			logger, err := newLogger(cmd, v)
+			if err != nil {
+				return fmt.Errorf("new logger: %w", err)
+			}
+
+			dataDir, err := cmd.Flags().GetString(optionNameDataDir)
+			if err != nil {
+				return fmt.Errorf("get data-dir: %w", err)
+			}
+			if dataDir == "" {
+				return errors.New("no data-dir provided")
+			}
+
+			logger.Infof("getting db indices with data-dir at %s", dataDir)
+
+			path := filepath.Join(dataDir, "localstore")
+
+			storer, err := localstore.New(path, nil, nil, nil, logger)
+			if err != nil {
+				return fmt.Errorf("localstore: %w", err)
+			}
+
+			indices, err := storer.DebugIndices()
+			if err != nil {
+				return fmt.Errorf("error fetching indices: %w", err)
+			}
+
+			for k, v := range indices {
+				logger.Infof("localstore index: %s, value: %d", k, v)
+			}
+
+			logger.Infof("done. took %s", time.Since(start))
+
+			return nil
+		},
+	}
+	c.Flags().String(optionNameDataDir, "", "data directory")
+	c.Flags().String(optionNameVerbosity, "info", "verbosity level")
+	cmd.AddCommand(c)
 }
 
 func dbExportCmd(cmd *cobra.Command) {
@@ -187,7 +243,7 @@ func dbNukeCmd(cmd *cobra.Command) {
 			logger.Warningf("Proceeding with database nuke...")
 
 			localstorePath := filepath.Join(dataDir, "localstore")
-			err = os.RemoveAll(localstorePath)
+			err = removeContent(localstorePath)
 			if err != nil {
 				return fmt.Errorf("localstore delete: %w", err)
 			}
@@ -199,8 +255,13 @@ func dbNukeCmd(cmd *cobra.Command) {
 				return fmt.Errorf("get forget overlay: %w", err)
 			}
 
+			forgetStamps, err := cmd.Flags().GetBool(optionNameForgetStamps)
+			if err != nil {
+				return fmt.Errorf("get forget stamps: %w", err)
+			}
+
 			if forgetOverlay {
-				err = os.RemoveAll(statestorePath)
+				err = removeContent(statestorePath)
 				if err != nil {
 					return fmt.Errorf("statestore delete: %w", err)
 				}
@@ -215,7 +276,7 @@ func dbNukeCmd(cmd *cobra.Command) {
 
 			logger.Warningf("Proceeding with statestore nuke...")
 
-			if err = stateStore.Nuke(); err != nil {
+			if err = stateStore.Nuke(forgetStamps); err != nil {
 				return fmt.Errorf("statestore nuke: %w", err)
 			}
 			return nil
@@ -223,6 +284,28 @@ func dbNukeCmd(cmd *cobra.Command) {
 	c.Flags().String(optionNameDataDir, "", "data directory")
 	c.Flags().String(optionNameVerbosity, "trace", "verbosity level")
 	c.Flags().Bool(optionNameForgetOverlay, false, "forget the overlay and deploy a new chequebook on next bootup")
+	c.Flags().Bool(optionNameForgetStamps, false, "forget the existing stamps belonging to the node. even when forgotten, they will show up again after a chain resync")
 	c.Flags().Duration(optionNameSleepAfter, time.Duration(0), "time to sleep after the operation finished")
 	cmd.AddCommand(c)
+}
+
+func removeContent(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+
+	subpaths, err := dir.Readdirnames(0)
+	if err != nil {
+		return err
+	}
+
+	for _, sub := range subpaths {
+		err = os.RemoveAll(filepath.Join(path, sub))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

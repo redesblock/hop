@@ -2,12 +2,10 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"crypto/ecdsa"
 	_ "embed"
 	"errors"
 	"fmt"
-	"github.com/redesblock/hop/cmd/version"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -15,10 +13,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/redesblock/hop/cmd/version"
+
 	"github.com/ethereum/go-ethereum/accounts/external"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/rpc"
-
 	"github.com/kardianos/service"
 	"github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/crypto/clef"
@@ -146,7 +145,12 @@ func (c *command) initStartCmd() (err error) {
 				return errors.New("static nodes can only be configured on bootnodes")
 			}
 
-			b, err := node.New(c.config.GetString(optionNameP2PAddr), signerConfig.publicKey, signerConfig.signer, networkID, logger, signerConfig.libp2pPrivateKey, signerConfig.pssPrivateKey, &node.Options{
+			// Wait for termination or interrupt signals.
+			// We want to clean up things at the end.
+			interruptChannel := make(chan os.Signal, 1)
+			signal.Notify(interruptChannel, syscall.SIGINT, syscall.SIGTERM)
+
+			b, err := node.New(interruptChannel, c.config.GetString(optionNameP2PAddr), signerConfig.publicKey, signerConfig.signer, networkID, logger, signerConfig.libp2pPrivateKey, signerConfig.pssPrivateKey, &node.Options{
 				DataDir:                    c.config.GetString(optionNameDataDir),
 				CacheCapacity:              c.config.GetUint64(optionNameCacheCapacity),
 				DBOpenFilesLimit:           c.config.GetUint64(optionNameDBOpenFilesLimit),
@@ -165,7 +169,6 @@ func (c *command) initStartCmd() (err error) {
 				TracingEndpoint:            tracingEndpoint,
 				TracingServiceName:         c.config.GetString(optionNameTracingServiceName),
 				Logger:                     logger,
-				GlobalPinningEnabled:       c.config.GetBool(optionNameGlobalPinningEnabled),
 				PaymentThreshold:           c.config.GetString(optionNamePaymentThreshold),
 				PaymentTolerance:           c.config.GetInt64(optionNamePaymentTolerance),
 				PaymentEarly:               c.config.GetInt64(optionNamePaymentEarly),
@@ -177,13 +180,12 @@ func (c *command) initStartCmd() (err error) {
 				SwapLegacyFactoryAddresses: c.config.GetStringSlice(optionNameSwapLegacyFactoryAddresses),
 				SwapInitialDeposit:         c.config.GetString(optionNameSwapInitialDeposit),
 				SwapEnable:                 c.config.GetBool(optionNameSwapEnable),
+				ChequebookEnable:           c.config.GetBool(optionNameChequebookEnable),
 				FullNodeMode:               fullNode,
 				Transaction:                c.config.GetString(optionNameTransactionHash),
 				BlockHash:                  c.config.GetString(optionNameBlockHash),
 				PostageContractAddress:     c.config.GetString(optionNamePostageContractAddress),
 				PriceOracleAddress:         c.config.GetString(optionNamePriceOracleAddress),
-				PledgeAddress:              c.config.GetString(optionNamePledgeAddress),
-				RewardAddress:              c.config.GetString(optionNameRewardAddress),
 				BlockTime:                  networkConfig.blockTime,
 				DeployGasPrice:             c.config.GetString(optionNameSwapDeploymentGasPrice),
 				WarmupTime:                 c.config.GetDuration(optionWarmUpTime),
@@ -197,23 +199,24 @@ func (c *command) initStartCmd() (err error) {
 				Restricted:                 c.config.GetBool(optionNameRestrictedAPI),
 				TokenEncryptionKey:         c.config.GetString(optionNameTokenEncryptionKey),
 				AdminPasswordHash:          c.config.GetString(optionNameAdminPasswordHash),
+				UsePostageSnapshot:         c.config.GetBool(optionNameUsePostageSnapshot),
+				PledgeAddress:              c.config.GetString(optionNamePledgeAddress),
+				RewardAddress:              c.config.GetString(optionNameRewardAddress),
 				ReceiptEndPoint:            c.config.GetString(optionNameReceiptEndpoint),
 			})
 			if err != nil {
 				return err
 			}
 
-			// Wait for termination or interrupt signals.
-			// We want to clean up things at the end.
-			interruptChannel := make(chan os.Signal, 1)
-			signal.Notify(interruptChannel, syscall.SIGINT, syscall.SIGTERM)
-
 			p := &program{
 				start: func() {
-					// Block main goroutine until it is interrupted
-					sig := <-interruptChannel
+					// Block main goroutine until it is interrupted or stopped
+					select {
+					case sig := <-interruptChannel:
+						logger.Debugf("received signal: %v", sig)
+					case <-b.SyncingStopped():
+					}
 
-					logger.Debugf("received signal: %v", sig)
 					logger.Info("shutting down")
 				},
 				stop: func() {
@@ -222,10 +225,7 @@ func (c *command) initStartCmd() (err error) {
 					go func() {
 						defer close(done)
 
-						ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-						defer cancel()
-
-						if err := b.Shutdown(ctx); err != nil {
+						if err := b.Shutdown(); err != nil {
 							logger.Errorf("shutdown: %v", err)
 						}
 					}()

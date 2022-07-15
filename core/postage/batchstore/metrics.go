@@ -6,34 +6,24 @@ import (
 )
 
 type metrics struct {
-	AvailableCapacity prometheus.Gauge
-	Inner             prometheus.Gauge
-	Outer             prometheus.Gauge
+	Commitment        prometheus.Gauge
 	Radius            prometheus.Gauge
 	StorageRadius     prometheus.Gauge
+	UnreserveDuration prometheus.HistogramVec
+	SaveDuration      prometheus.HistogramVec
+	ExistsDuration    prometheus.HistogramVec
+	GetDuration       prometheus.HistogramVec
 }
 
 func newMetrics() metrics {
 	subsystem := "batchstore"
 
 	return metrics{
-		AvailableCapacity: prometheus.NewGauge(prometheus.GaugeOpts{
+		Commitment: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: m.Namespace,
 			Subsystem: subsystem,
-			Name:      "available_capacity",
-			Help:      "Available capacity observed by the batchstore.",
-		}),
-		Inner: prometheus.NewGauge(prometheus.GaugeOpts{
-			Namespace: m.Namespace,
-			Subsystem: subsystem,
-			Name:      "inner",
-			Help:      "Inner storage tier value observed by the batchstore.",
-		}),
-		Outer: prometheus.NewGauge(prometheus.GaugeOpts{
-			Namespace: m.Namespace,
-			Subsystem: subsystem,
-			Name:      "outer",
-			Help:      "Outer storage tier value observed by the batchstore.",
+			Name:      "commitment",
+			Help:      "Sum of all batches' commitment.",
 		}),
 		Radius: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: m.Namespace,
@@ -47,6 +37,30 @@ func newMetrics() metrics {
 			Name:      "storage_radius",
 			Help:      "Radius of responsibility communicated to the localstore",
 		}),
+		UnreserveDuration: *prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "unreserve_duration",
+			Help:      "Duration in seconds for the Unreserve call.",
+		}, []string{"beforeLock"}),
+		SaveDuration: *prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "save_batch_duration",
+			Help:      "Duration in seconds for the Save call.",
+		}, []string{"beforeLock"}),
+		ExistsDuration: *prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "exists_batch_duration",
+			Help:      "Duration in seconds for the Exists call.",
+		}, []string{"beforeLock"}),
+		GetDuration: *prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: m.Namespace,
+			Subsystem: subsystem,
+			Name:      "get_batch_duration",
+			Help:      "Duration in seconds for the Get call.",
+		}, []string{"beforeLock"}),
 	}
 }
 

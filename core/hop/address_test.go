@@ -35,7 +35,7 @@ func TestHopAddress(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hopAddress2, err := hop.ParseAddress(node1ma.Bytes(), overlay.Bytes(), hopAddress.Signature, trxHash, blockHash, 3)
+	hopAddress2, err := hop.ParseAddress(node1ma.Bytes(), overlay.Bytes(), hopAddress.Signature, trxHash, blockHash, true, 3)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,11 +3,11 @@ package erc20
 import (
 	"context"
 	"errors"
-	hopabi "github.com/redesblock/hop/contracts/abi"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	hopabi "github.com/redesblock/hop/contracts/abi"
 	"github.com/redesblock/hop/core/sctx"
 	"github.com/redesblock/hop/core/transaction"
 )
@@ -18,22 +18,17 @@ var (
 )
 
 type Service interface {
-	TotalSupply(ctx context.Context) (*big.Int, error)
 	BalanceOf(ctx context.Context, address common.Address) (*big.Int, error)
 	Transfer(ctx context.Context, address common.Address, value *big.Int) (common.Hash, error)
-	Approval(ctx context.Context, spender common.Address, value *big.Int) (common.Hash, error)
-	Allowance(ctx context.Context, owner common.Address, spender common.Address) (*big.Int, error)
 }
 
 type erc20Service struct {
-	backend            transaction.Backend
 	transactionService transaction.Service
 	address            common.Address
 }
 
-func New(backend transaction.Backend, transactionService transaction.Service, address common.Address) Service {
+func New(transactionService transaction.Service, address common.Address) Service {
 	return &erc20Service{
-		backend:            backend,
 		transactionService: transactionService,
 		address:            address,
 	}

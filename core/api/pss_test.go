@@ -182,9 +182,9 @@ func TestPssSend(t *testing.T) {
 			mtx.Unlock()
 			return err
 		}
-		mp           = mockpost.New(mockpost.WithIssuer(postage.NewStampIssuer("", "", batchOk, big.NewInt(3), 11, 10, 1000, true)))
-		p            = newMockPss(sendFn)
-		client, _, _ = newTestServer(t, testServerOptions{
+		mp              = mockpost.New(mockpost.WithIssuer(postage.NewStampIssuer("", "", batchOk, big.NewInt(3), 11, 10, 1000, true)))
+		p               = newMockPss(sendFn)
+		client, _, _, _ = newTestServer(t, testServerOptions{
 			Pss:    p,
 			Storer: mock.NewStorer(),
 			Logger: logger,
@@ -212,7 +212,7 @@ func TestPssSend(t *testing.T) {
 		)
 
 		// If this test needs to be modified (most probably because the max target length changed)
-		// the please verify that Common.yaml -> components -> PssTarget also reflects the correct value
+		// the please verify that SwarmCommon.yaml -> components -> PssTarget also reflects the correct value
 		jsonhttptest.Request(t, client, http.MethodPost, "/pss/send/to/123456789abcdf?recipient="+recipient, http.StatusBadRequest,
 			jsonhttptest.WithRequestBody(bytes.NewReader(payload)),
 			jsonhttptest.WithExpectedJSONResponse(jsonhttp.StatusResponse{
@@ -334,7 +334,7 @@ func waitReadMessage(t *testing.T, mtx *sync.Mutex, cl *websocket.Conn, targetCo
 		case <-done:
 			return
 		case <-timeout:
-			t.Errorf("timed out waiting for message")
+			t.Error("timed out waiting for message")
 			return
 		default:
 		}
@@ -411,7 +411,7 @@ func newPssTest(t *testing.T, o opts) (pss.Interface, *ecdsa.PublicKey, *websock
 	if o.pingPeriod == 0 {
 		o.pingPeriod = 10 * time.Second
 	}
-	_, cl, listener := newTestServer(t, testServerOptions{
+	_, cl, listener, _ := newTestServer(t, testServerOptions{
 		Pss:          pss,
 		WsPath:       "/pss/subscribe/testtopic",
 		Storer:       mock.NewStorer(),

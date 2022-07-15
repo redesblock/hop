@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -16,7 +15,6 @@ import (
 	"github.com/redesblock/hop/core/p2p/protobuf"
 	"github.com/redesblock/hop/core/swarm"
 
-	"github.com/libp2p/go-libp2p-core/network"
 	libp2ppeer "github.com/libp2p/go-libp2p-core/peer"
 	ma "github.com/multiformats/go-multiaddr"
 )
@@ -37,9 +35,6 @@ var (
 	// ErrNetworkIDIncompatible is returned if response from the other peer does not have valid networkID.
 	ErrNetworkIDIncompatible = errors.New("incompatible network ID")
 
-	// ErrHandshakeDuplicate is returned  if the handshake response has been received by an already processed peer.
-	ErrHandshakeDuplicate = errors.New("duplicate handshake")
-
 	// ErrInvalidAck is returned if data in received in ack is not valid (invalid signature for example).
 	ErrInvalidAck = errors.New("invalid ack")
 
@@ -50,7 +45,7 @@ var (
 	ErrWelcomeMessageLength = fmt.Errorf("handshake welcome message longer than maximum of %d characters", MaxWelcomeMessageLength)
 
 	// ErrPicker is returned if the picker (kademlia) rejects the peer
-	ErrPicker = fmt.Errorf("picker rejection")
+	ErrPicker = errors.New("picker rejection")
 )
 
 // AdvertisableAddressResolver can Resolve a Multiaddress.
@@ -58,26 +53,20 @@ type AdvertisableAddressResolver interface {
 	Resolve(observedAddress ma.Multiaddr) (ma.Multiaddr, error)
 }
 
-type SenderMatcher interface {
-	Matches(ctx context.Context, tx []byte, networkID uint64, senderOverlay swarm.Address, ignoreGreylist bool) ([]byte, error)
-}
-
 // Service can perform initiate or handle a handshake between peers.
 type Service struct {
 	signer                crypto.Signer
 	advertisableAddresser AdvertisableAddressResolver
-	senderMatcher         SenderMatcher
+	senderMatcher         p2p.SenderMatcher
 	overlay               swarm.Address
 	fullNode              bool
 	transaction           []byte
 	networkID             uint64
+	validateOverlay       bool
 	welcomeMessage        atomic.Value
-	receivedHandshakes    map[libp2ppeer.ID]struct{}
-	receivedHandshakesMu  sync.Mutex
 	logger                logging.Logger
 	libp2pID              libp2ppeer.ID
 	metrics               metrics
-	network.Notifiee      // handshake service can be the receiver for network.Notify
 	picker                p2p.Picker
 }
 
@@ -96,7 +85,7 @@ func (i *Info) LightString() string {
 }
 
 // New creates a new handshake Service.
-func New(signer crypto.Signer, advertisableAddresser AdvertisableAddressResolver, isSender SenderMatcher, overlay swarm.Address, networkID uint64, fullNode bool, transaction []byte, welcomeMessage string, ownPeerID libp2ppeer.ID, logger logging.Logger) (*Service, error) {
+func New(signer crypto.Signer, advertisableAddresser AdvertisableAddressResolver, isSender p2p.SenderMatcher, overlay swarm.Address, networkID uint64, fullNode bool, transaction []byte, welcomeMessage string, validateOverlay bool, ownPeerID libp2ppeer.ID, logger logging.Logger) (*Service, error) {
 	if len(welcomeMessage) > MaxWelcomeMessageLength {
 		return nil, ErrWelcomeMessageLength
 	}
@@ -107,13 +96,12 @@ func New(signer crypto.Signer, advertisableAddresser AdvertisableAddressResolver
 		overlay:               overlay,
 		networkID:             networkID,
 		fullNode:              fullNode,
+		validateOverlay:       validateOverlay,
 		transaction:           transaction,
 		senderMatcher:         isSender,
-		receivedHandshakes:    make(map[libp2ppeer.ID]struct{}),
 		libp2pID:              ownPeerID,
 		logger:                logger,
 		metrics:               newMetrics(),
-		Notifiee:              new(network.NoopNotifiee),
 	}
 	svc.welcomeMessage.Store(welcomeMessage)
 
@@ -199,7 +187,7 @@ func (s *Service) Handshake(ctx context.Context, stream p2p.Stream, peerMultiadd
 
 	// Synced read:
 	welcomeMessage := s.GetWelcomeMessage()
-	if err := w.WriteMsgWithContext(ctx, &pb.Ack{
+	msg := &pb.Ack{
 		Address: &pb.HopAddress{
 			Underlay:  advertisableUnderlayBytes,
 			Overlay:   hopAddress.Overlay.Bytes(),
@@ -209,13 +197,15 @@ func (s *Service) Handshake(ctx context.Context, stream p2p.Stream, peerMultiadd
 		FullNode:       s.fullNode,
 		Transaction:    s.transaction,
 		WelcomeMessage: welcomeMessage,
-	}); err != nil {
+	}
+
+	if err := w.WriteMsgWithContext(ctx, msg); err != nil {
 		return nil, fmt.Errorf("write ack message: %w", err)
 	}
 
 	s.logger.Tracef("handshake finished for peer (outbound) %s", remoteHopAddress.Overlay.String())
 	if len(resp.Ack.WelcomeMessage) > 0 {
-		s.logger.Infof("greeting \"%s\" from peer: %s", resp.Ack.WelcomeMessage, remoteHopAddress.Overlay.String())
+		s.logger.Debugf("greeting %q from peer: %s", resp.Ack.WelcomeMessage, remoteHopAddress.Overlay.String())
 	}
 
 	return &Info{
@@ -229,14 +219,6 @@ func (s *Service) Handle(ctx context.Context, stream p2p.Stream, remoteMultiaddr
 	ctx, cancel := context.WithTimeout(ctx, handshakeTimeout)
 	defer cancel()
 
-	s.receivedHandshakesMu.Lock()
-	if _, exists := s.receivedHandshakes[remotePeerID]; exists {
-		s.receivedHandshakesMu.Unlock()
-		return nil, ErrHandshakeDuplicate
-	}
-
-	s.receivedHandshakes[remotePeerID] = struct{}{}
-	s.receivedHandshakesMu.Unlock()
 	w, r := protobuf.NewWriterAndReader(stream)
 	fullRemoteMA, err := buildFullMA(remoteMultiaddr, remotePeerID)
 	if err != nil {
@@ -329,20 +311,13 @@ func (s *Service) Handle(ctx context.Context, stream p2p.Stream, remoteMultiaddr
 
 	s.logger.Tracef("handshake finished for peer (inbound) %s", remoteHopAddress.Overlay.String())
 	if len(ack.WelcomeMessage) > 0 {
-		s.logger.Infof("greeting \"%s\" from peer: %s", ack.WelcomeMessage, remoteHopAddress.Overlay.String())
+		s.logger.Debugf("greeting %q from peer: %s", ack.WelcomeMessage, remoteHopAddress.Overlay.String())
 	}
 
 	return &Info{
 		HopAddress: remoteHopAddress,
 		FullNode:   ack.FullNode,
 	}, nil
-}
-
-// Disconnected is called when the peer disconnects.
-func (s *Service) Disconnected(_ network.Network, c network.Conn) {
-	s.receivedHandshakesMu.Lock()
-	defer s.receivedHandshakesMu.Unlock()
-	delete(s.receivedHandshakes, c.RemotePeer())
 }
 
 // SetWelcomeMessage sets the new handshake welcome message.
@@ -364,7 +339,7 @@ func buildFullMA(addr ma.Multiaddr, peerID libp2ppeer.ID) (ma.Multiaddr, error) 
 }
 
 func (s *Service) parseCheckAck(ack *pb.Ack, blockHash []byte) (*hop.Address, error) {
-	hopAddress, err := hop.ParseAddress(ack.Address.Underlay, ack.Address.Overlay, ack.Address.Signature, ack.Transaction, blockHash, s.networkID)
+	hopAddress, err := hop.ParseAddress(ack.Address.Underlay, ack.Address.Overlay, ack.Address.Signature, ack.Transaction, blockHash, s.validateOverlay, s.networkID)
 	if err != nil {
 		return nil, ErrInvalidAck
 	}

@@ -1,22 +1,29 @@
 package localstore
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"runtime/pprof"
 	"sync"
 	"time"
 
+	"github.com/hashicorp/go-multierror"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/pinning"
 	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/postage/batchstore"
+	"github.com/redesblock/hop/core/sharky"
 	"github.com/redesblock/hop/core/shed"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
+	"github.com/spf13/afero"
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
@@ -41,10 +48,19 @@ var (
 	flipFlopWorstCaseDuration = 10 * time.Second
 )
 
+const (
+	sharkyNoOfShards    = 32
+	sharkyDirtyFileName = ".DIRTY"
+)
+
 // DB is the local store implementation and holds
 // database related objects.
 type DB struct {
 	shed *shed.DB
+	// sharky instance
+	sharky       *sharky.Store
+	fdirtyCloser func() error
+
 	tags *tags.Tags
 
 	// stateStore is needed to access the pinning Service.Pins() method.
@@ -87,7 +103,7 @@ type DB struct {
 	// postage index index
 	postageIndexIndex shed.Index
 
-	// field that stores number of intems in gc index
+	// field that stores number of items in gc index
 	gcSize shed.Uint64Field
 
 	// field that stores the size of the reserve
@@ -134,6 +150,11 @@ type DB struct {
 	// to terminate other goroutines
 	close chan struct{}
 
+	// context
+	ctx context.Context
+	// the cancelation function from the context
+	cancel context.CancelFunc
+
 	// protect Close method from exiting before
 	// garbage collection and gc size write workers
 	// are done
@@ -178,6 +199,63 @@ type Options struct {
 	Tags          *tags.Tags
 }
 
+type memFS struct {
+	afero.Fs
+}
+
+func (m *memFS) Open(path string) (fs.File, error) {
+	return m.Fs.OpenFile(path, os.O_RDWR|os.O_CREATE, 0644)
+}
+
+type dirFS struct {
+	basedir string
+}
+
+func (d *dirFS) Open(path string) (fs.File, error) {
+	return os.OpenFile(filepath.Join(d.basedir, path), os.O_RDWR|os.O_CREATE, 0644)
+}
+
+func safeInit(rootPath, sharkyBasePath string, db *DB) error {
+	// create if needed
+	path := filepath.Join(rootPath, sharkyDirtyFileName)
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		// missing lock file implies a clean exit then create the file and return
+		return os.WriteFile(path, []byte{}, 0644)
+	}
+	locOrErr, err := recovery(db)
+	if err != nil {
+		return err
+	}
+
+	recoverySharky, err := sharky.NewRecovery(sharkyBasePath, sharkyNoOfShards, swarm.SocMaxChunkSize)
+	if err != nil {
+		return err
+	}
+
+	for l := range locOrErr {
+		if l.err != nil {
+			return l.err
+		}
+
+		err = recoverySharky.Add(l.loc)
+		if err != nil {
+			return err
+		}
+	}
+
+	err = recoverySharky.Save()
+	if err != nil {
+		return err
+	}
+
+	err = recoverySharky.Close()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // New returns a new DB.  All fields and indexes are initialized
 // and possible conflicts with schema from existing database is checked.
 // One goroutine for writing batches is created.
@@ -190,6 +268,8 @@ func New(path string, baseKey []byte, ss storage.StateStorer, o *Options, logger
 		}
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	db = &DB{
 		stateStore:      ss,
 		cacheCapacity:   o.Capacity,
@@ -197,6 +277,8 @@ func New(path string, baseKey []byte, ss storage.StateStorer, o *Options, logger
 		unreserveFunc:   o.UnreserveFunc,
 		baseKey:         baseKey,
 		tags:            o.Tags,
+		ctx:             ctx,
+		cancel:          cancel,
 		// channel collectGarbageTrigger
 		// needs to be buffered with the size of 1
 		// to signal another event if it
@@ -241,6 +323,33 @@ func New(path string, baseKey []byte, ss storage.StateStorer, o *Options, logger
 		return nil, err
 	}
 
+	// instantiate sharky instance
+	var sharkyBase fs.FS
+	if path == "" {
+		// No need for recovery for in-mem sharky
+		sharkyBase = &memFS{Fs: afero.NewMemMapFs()}
+	} else {
+		sharkyBasePath := filepath.Join(path, "sharky")
+		if _, err := os.Stat(sharkyBasePath); os.IsNotExist(err) {
+			err := os.Mkdir(sharkyBasePath, 0775)
+			if err != nil {
+				return nil, err
+			}
+		}
+		sharkyBase = &dirFS{basedir: sharkyBasePath}
+
+		err = safeInit(path, sharkyBasePath, db)
+		if err != nil {
+			return nil, fmt.Errorf("safe sharky initialization failed: %w", err)
+		}
+		db.fdirtyCloser = func() error { return os.Remove(filepath.Join(path, sharkyDirtyFileName)) }
+	}
+
+	db.sharky, err = sharky.New(sharkyBase, sharkyNoOfShards, swarm.SocMaxChunkSize)
+	if err != nil {
+		return nil, err
+	}
+
 	// Identify current storage schema by arbitrary name.
 	db.schemaName, err = db.shed.NewStringField("schema-name")
 	if err != nil {
@@ -257,10 +366,9 @@ func New(path string, baseKey []byte, ss storage.StateStorer, o *Options, logger
 			return nil, err
 		}
 	} else {
-		// execute possible migrations
-		err = db.migrate(schemaName)
-		if err != nil {
-			return nil, err
+		// Execute possible migrations.
+		if err := db.migrate(schemaName); err != nil {
+			return nil, multierror.Append(err, db.sharky.Close(), db.shed.Close(), db.fdirtyCloser())
 		}
 	}
 
@@ -278,7 +386,7 @@ func New(path string, baseKey []byte, ss storage.StateStorer, o *Options, logger
 
 	// Index storing actual chunk address, data and bin id.
 	headerSize := 16 + postage.StampSize
-	db.retrievalDataIndex, err = db.shed.NewIndex("Address->StoreTimestamp|BinID|BatchID|BatchIndex|Sig|Data", shed.IndexFuncs{
+	db.retrievalDataIndex, err = db.shed.NewIndex("Address->StoreTimestamp|BinID|BatchID|BatchIndex|Sig|Location", shed.IndexFuncs{
 		EncodeKey: func(fields shed.Item) (key []byte, err error) {
 			return fields.Address, nil
 		},
@@ -295,7 +403,7 @@ func New(path string, baseKey []byte, ss storage.StateStorer, o *Options, logger
 				return nil, err
 			}
 			copy(b[16:], stamp)
-			value = append(b, fields.Data...)
+			value = append(b, fields.Location...)
 			return value, nil
 		},
 		DecodeValue: func(keyItem shed.Item, value []byte) (e shed.Item, err error) {
@@ -309,7 +417,7 @@ func New(path string, baseKey []byte, ss storage.StateStorer, o *Options, logger
 			e.Index = stamp.Index()
 			e.Timestamp = stamp.Timestamp()
 			e.Sig = stamp.Sig()
-			e.Data = value[headerSize:]
+			e.Location = value[headerSize:]
 			return e, nil
 		},
 	})
@@ -540,8 +648,9 @@ func New(path string, baseKey []byte, ss storage.StateStorer, o *Options, logger
 }
 
 // Close closes the underlying database.
-func (db *DB) Close() (err error) {
+func (db *DB) Close() error {
 	close(db.close)
+	db.cancel()
 
 	// wait for all handlers to finish
 	done := make(chan struct{})
@@ -553,19 +662,25 @@ func (db *DB) Close() (err error) {
 		<-db.reserveEvictionWorkerDone
 		close(done)
 	}()
+
+	err := new(multierror.Error)
+
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		db.logger.Errorf("localstore closed with still active goroutines")
+		db.logger.Error("localstore closed with still active goroutines")
 		// Print a full goroutine dump to debug blocking.
 		// TODO: use a logger to write a goroutine profile
 		prof := pprof.Lookup("goroutine")
-		err = prof.WriteTo(os.Stdout, 2)
-		if err != nil {
-			return err
-		}
+		err = multierror.Append(err, prof.WriteTo(os.Stdout, 2))
 	}
-	return db.shed.Close()
+
+	err = multierror.Append(err, db.sharky.Close())
+	err = multierror.Append(err, db.shed.Close())
+	if db.fdirtyCloser != nil {
+		err = multierror.Append(err, db.fdirtyCloser())
+	}
+	return err.ErrorOrNil()
 }
 
 // po computes the proximity order between the address
@@ -587,6 +702,7 @@ func (db *DB) DebugIndices() (indexInfo map[string]int, err error) {
 		"pinIndex":             db.pinIndex,
 		"postageChunksIndex":   db.postageChunksIndex,
 		"postageRadiusIndex":   db.postageRadiusIndex,
+		"postageIndexIndex":    db.postageIndexIndex,
 	} {
 		indexSize, err := v.Count()
 		if err != nil {
@@ -599,6 +715,12 @@ func (db *DB) DebugIndices() (indexInfo map[string]int, err error) {
 		return indexInfo, err
 	}
 	indexInfo["gcSize"] = int(val)
+
+	val, err = db.reserveSize.Get()
+	if err != nil {
+		return indexInfo, err
+	}
+	indexInfo["reserveSize"] = int(val)
 
 	return indexInfo, err
 }
@@ -668,5 +790,4 @@ func init() {
 func totalTimeMetric(metric prometheus.Counter, start time.Time) {
 	totalTime := time.Since(start)
 	metric.Add(float64(totalTime))
-
 }

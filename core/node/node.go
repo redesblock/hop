@@ -8,8 +8,6 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
-	"github.com/redesblock/hop/core/settlement/swap/pledge"
-	"github.com/redesblock/hop/core/settlement/swap/reward"
 	"io"
 	"log"
 	"math/big"
@@ -19,7 +17,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -34,7 +31,6 @@ import (
 	"github.com/redesblock/hop/core/chainsyncer"
 	"github.com/redesblock/hop/core/config"
 	"github.com/redesblock/hop/core/crypto"
-	"github.com/redesblock/hop/core/debugapi"
 	"github.com/redesblock/hop/core/feeds/factory"
 	"github.com/redesblock/hop/core/hive"
 	"github.com/redesblock/hop/core/localstore"
@@ -58,12 +54,12 @@ import (
 	"github.com/redesblock/hop/core/pullsync/pullstorage"
 	"github.com/redesblock/hop/core/pusher"
 	"github.com/redesblock/hop/core/pushsync"
-	"github.com/redesblock/hop/core/recovery"
 	"github.com/redesblock/hop/core/resolver/multiresolver"
 	"github.com/redesblock/hop/core/retrieval"
 	"github.com/redesblock/hop/core/settlement/pseudosettle"
 	"github.com/redesblock/hop/core/settlement/swap"
 	"github.com/redesblock/hop/core/settlement/swap/chequebook"
+	"github.com/redesblock/hop/core/settlement/swap/erc20"
 	"github.com/redesblock/hop/core/settlement/swap/priceoracle"
 	"github.com/redesblock/hop/core/shed"
 	"github.com/redesblock/hop/core/steward"
@@ -105,7 +101,6 @@ type Node struct {
 	ethClientCloser          func()
 	transactionMonitorCloser io.Closer
 	transactionCloser        io.Closer
-	recoveryHandleCleanup    func()
 	listenerCloser           io.Closer
 	postageServiceCloser     io.Closer
 	priceOracleCloser        io.Closer
@@ -113,6 +108,7 @@ type Node struct {
 	chainSyncerCloser        io.Closer
 	shutdownInProgress       bool
 	shutdownMutex            sync.Mutex
+	syncingStopped           chan struct{}
 }
 
 type Options struct {
@@ -134,7 +130,6 @@ type Options struct {
 	TracingEnabled             bool
 	TracingEndpoint            string
 	TracingServiceName         string
-	GlobalPinningEnabled       bool
 	PaymentThreshold           string
 	PaymentTolerance           int64
 	PaymentEarly               int64
@@ -147,13 +142,12 @@ type Options struct {
 	SwapLegacyFactoryAddresses []string
 	SwapInitialDeposit         string
 	SwapEnable                 bool
+	ChequebookEnable           bool
 	FullNodeMode               bool
 	Transaction                string
 	BlockHash                  string
 	PostageContractAddress     string
 	PriceOracleAddress         string
-	PledgeAddress              string
-	RewardAddress              string
 	BlockTime                  uint64
 	DeployGasPrice             string
 	WarmupTime                 time.Duration
@@ -166,6 +160,9 @@ type Options struct {
 	Restricted                 bool
 	TokenEncryptionKey         string
 	AdminPasswordHash          string
+	UsePostageSnapshot         bool
+	PledgeAddress              string
+	RewardAddress              string
 	ReceiptEndPoint            string
 }
 
@@ -175,9 +172,15 @@ const (
 	basePrice                     = 10000
 	postageSyncingStallingTimeout = 10 * time.Minute
 	postageSyncingBackoffTimeout  = 5 * time.Second
+	minPaymentThreshold           = 2 * refreshRate
+	maxPaymentThreshold           = 24 * refreshRate
+	mainnetNetworkID              = uint64(1)
 )
 
-func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkID uint64, logger logging.Logger, libp2pPrivateKey, pssPrivateKey *ecdsa.PrivateKey, o *Options) (b *Node, err error) {
+var ErrInterruped = errors.New("interrupted")
+
+func New(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkID uint64, logger logging.Logger, libp2pPrivateKey, pssPrivateKey *ecdsa.PrivateKey, o *Options) (b *Node, err error) {
+
 	tracer, tracerCloser, err := tracing.NewTracer(&tracing.Options{
 		Enabled:     o.TracingEnabled,
 		Endpoint:    o.TracingEndpoint,
@@ -207,7 +210,17 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 		p2pCancel:      p2pCancel,
 		errorLogWriter: logger.WriterLevel(logrus.ErrorLevel),
 		tracerCloser:   tracerCloser,
+		syncingStopped: make(chan struct{}),
 	}
+
+	defer func(b *Node) {
+		if err != nil {
+			logger.Errorf("got error %v, shutting down...", err)
+			if err2 := b.Shutdown(); err2 != nil {
+				logger.Errorf("got error while shutting down: %v", err2)
+			}
+		}
+	}(b)
 
 	stateStore, err := InitStateStore(logger, o.DataDir)
 	if err != nil {
@@ -215,38 +228,65 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 	}
 	b.stateStoreCloser = stateStore
 
+	// Check if the the batchstore exists. If not, we can assume it's missing
+	// due to a migration or it's a fresh install.
+	batchStoreExists, err := batchStoreExists(stateStore)
+	if err != nil {
+		return nil, err
+	}
+
 	addressbook := addressbook.New(stateStore)
 
 	var (
-		swapBackend        transaction.Backend
+		chainBackend       transaction.Backend
 		overlayEthAddress  common.Address
 		chainID            int64
 		transactionService transaction.Service
 		transactionMonitor transaction.Monitor
 		chequebookFactory  chequebook.Factory
-		chequebookService  chequebook.Service
+		chequebookService  chequebook.Service = new(noOpChequebookService)
 		chequeStore        chequebook.ChequeStore
 		cashoutService     chequebook.CashoutService
 		pollingInterval    = time.Duration(o.BlockTime) * time.Second
+		erc20Service       erc20.Service
 	)
-	swapBackend, overlayEthAddress, chainID, transactionMonitor, transactionService, err = InitChain(
+
+	chainEnabled := isChainEnabled(o, o.SwapEndpoint, logger)
+
+	var batchStore postage.Storer = new(postage.NoOpBatchStore)
+	var unreserveFn func([]byte, uint8) (uint64, error)
+
+	if chainEnabled {
+		var evictFn = func(b []byte) error {
+			_, err := unreserveFn(b, swarm.MaxPO+1)
+			return err
+		}
+		batchStore, err = batchstore.New(stateStore, evictFn, logger)
+		if err != nil {
+			return nil, fmt.Errorf("batchstore: %w", err)
+		}
+	}
+
+	chainBackend, overlayEthAddress, chainID, transactionMonitor, transactionService, err = InitChain(
 		p2pCtx,
 		logger,
 		stateStore,
 		o.SwapEndpoint,
+		o.ChainID,
 		signer,
 		pollingInterval,
-	)
+		chainEnabled)
 	if err != nil {
 		return nil, fmt.Errorf("init chain: %w", err)
 	}
-	b.ethClientCloser = swapBackend.Close
-	b.transactionCloser = tracerCloser
-	b.transactionMonitorCloser = transactionMonitor
+	b.ethClientCloser = chainBackend.Close
 
 	if o.ChainID != -1 && o.ChainID != chainID {
 		return nil, fmt.Errorf("connected to wrong ethereum network; network chainID %d; configured chainID %d", chainID, o.ChainID)
 	}
+
+	b.transactionCloser = tracerCloser
+	b.transactionMonitorCloser = transactionMonitor
 
 	var authenticator *auth.Authenticator
 
@@ -257,14 +297,17 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 		logger.Info("starting with restricted APIs")
 	}
 
-	var debugAPIService *debugapi.Service
+	// set up basic debug api endpoints for debugging and /health endpoint
+	hopNodeMode := api.LightMode
+	if o.FullNodeMode {
+		hopNodeMode = api.FullMode
+	} else if !chainEnabled {
+		hopNodeMode = api.UltraLightMode
+	}
+
+	var debugService *api.Service
 
 	if o.DebugAPIAddr != "" {
-		overlayEthAddress, err := signer.EthereumAddress()
-		if err != nil {
-			return nil, fmt.Errorf("eth address: %w", err)
-		}
-
 		if o.MutexProfile {
 			_ = runtime.SetMutexProfileFraction(1)
 		}
@@ -273,18 +316,18 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 			runtime.SetBlockProfileRate(1)
 		}
 
-		// set up basic debug api endpoints for debugging and /health endpoint
-		debugAPIService = debugapi.New(*publicKey, pssPrivateKey.PublicKey, overlayEthAddress, logger, tracer, o.CORSAllowedOrigins, big.NewInt(int64(o.BlockTime)), swapBackend, transactionService, o.Restricted, authenticator)
-
 		debugAPIListener, err := net.Listen("tcp", o.DebugAPIAddr)
 		if err != nil {
 			return nil, fmt.Errorf("debug api listener: %w", err)
 		}
 
+		debugService = api.New(*publicKey, pssPrivateKey.PublicKey, overlayEthAddress, logger, transactionService, batchStore, o.GatewayMode, hopNodeMode, o.ChequebookEnable, o.SwapEnable, o.CORSAllowedOrigins)
+		debugService.MountTechnicalDebug()
+
 		debugAPIServer := &http.Server{
 			IdleTimeout:       30 * time.Second,
 			ReadHeaderTimeout: 3 * time.Second,
-			Handler:           debugAPIService,
+			Handler:           debugService,
 			ErrorLog:          log.New(b.errorLogWriter, "", 0),
 		}
 
@@ -300,15 +343,46 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 		b.debugAPIServer = debugAPIServer
 	}
 
+	var apiService *api.Service
+
+	if o.Restricted {
+		apiService = api.New(*publicKey, pssPrivateKey.PublicKey, overlayEthAddress, logger, transactionService, batchStore, o.GatewayMode, hopNodeMode, o.ChequebookEnable, o.SwapEnable, o.CORSAllowedOrigins)
+		apiService.MountTechnicalDebug()
+
+		apiServer := &http.Server{
+			IdleTimeout:       30 * time.Second,
+			ReadHeaderTimeout: 3 * time.Second,
+			Handler:           apiService,
+			ErrorLog:          log.New(b.errorLogWriter, "", 0),
+		}
+
+		apiListener, err := net.Listen("tcp", o.APIAddr)
+		if err != nil {
+			return nil, fmt.Errorf("api listener: %w", err)
+		}
+
+		go func() {
+			logger.Infof("single debug & api address: %s", apiListener.Addr())
+
+			if err := apiServer.Serve(apiListener); err != nil && err != http.ErrServerClosed {
+				logger.Debugf("single debug & api server: %v", err)
+				logger.Error("unable to serve debug & api")
+			}
+		}()
+
+		b.apiServer = apiServer
+		b.apiCloser = apiServer
+	}
+
 	// Sync the with the given Ethereum backend:
-	isSynced, _, err := transaction.IsSynced(p2pCtx, swapBackend, maxDelay)
+	isSynced, _, err := transaction.IsSynced(p2pCtx, chainBackend, maxDelay)
 	if err != nil {
 		return nil, fmt.Errorf("is synced: %w", err)
 	}
 	if !isSynced {
 		logger.Infof("waiting to sync with the Ethereum backend")
 
-		err := transaction.WaitSynced(p2pCtx, logger, swapBackend, maxDelay)
+		err := transaction.WaitSynced(p2pCtx, logger, chainBackend, maxDelay)
 		if err != nil {
 			return nil, fmt.Errorf("waiting backend sync: %w", err)
 		}
@@ -317,7 +391,7 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 	if o.SwapEnable {
 		chequebookFactory, err = InitChequebookFactory(
 			logger,
-			swapBackend,
+			chainBackend,
 			chainID,
 			transactionService,
 			o.SwapFactoryAddress,
@@ -331,26 +405,36 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 			return nil, fmt.Errorf("factory fail: %w", err)
 		}
 
-		chequebookService, err = InitChequebookService(
-			p2pCtx,
-			logger,
-			stateStore,
-			signer,
-			chainID,
-			swapBackend,
-			overlayEthAddress,
-			transactionService,
-			chequebookFactory,
-			o.SwapInitialDeposit,
-			o.DeployGasPrice,
-		)
+		erc20Address, err := chequebookFactory.ERC20Address(p2pCtx)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("factory fail: %w", err)
+		}
+
+		erc20Service = erc20.New(transactionService, erc20Address)
+
+		if o.ChequebookEnable && chainEnabled {
+			chequebookService, err = InitChequebookService(
+				p2pCtx,
+				logger,
+				stateStore,
+				signer,
+				chainID,
+				chainBackend,
+				overlayEthAddress,
+				transactionService,
+				chequebookFactory,
+				o.SwapInitialDeposit,
+				o.DeployGasPrice,
+				erc20Service,
+			)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		chequeStore, cashoutService = initChequeStoreCashout(
 			stateStore,
-			swapBackend,
+			chainBackend,
 			chequebookFactory,
 			chainID,
 			overlayEthAddress,
@@ -373,51 +457,117 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 		return nil, fmt.Errorf("invalid transaction hash: %w", err)
 	}
 
-	blockHash, err = GetTxNextBlock(p2pCtx, logger, swapBackend, transactionMonitor, pollingInterval, txHash, o.BlockHash)
+	blockHash, err = GetTxNextBlock(p2pCtx, logger, chainBackend, transactionMonitor, pollingInterval, txHash, o.BlockHash)
 	if err != nil {
 		return nil, fmt.Errorf("invalid block hash: %w", err)
 	}
 
 	swarmAddress, err := crypto.NewOverlayAddress(*pubKey, networkID, blockHash)
-
-	err = CheckOverlayWithStore(swarmAddress, stateStore)
 	if err != nil {
+		return nil, fmt.Errorf("compute overlay address: %w", err)
+	}
+	logger.Infof("using overlay address %s", swarmAddress)
+
+	apiService.SetSwarmAddress(&swarmAddress)
+
+	if err = CheckOverlayWithStore(swarmAddress, stateStore); err != nil {
 		return nil, err
 	}
 
 	lightNodes := lightnode.NewContainer(swarmAddress)
 
-	senderMatcher := transaction.NewMatcher(swapBackend, types.NewLondonSigner(big.NewInt(chainID)), stateStore)
-
+	senderMatcher := transaction.NewMatcher(chainBackend, types.NewLondonSigner(big.NewInt(chainID)), stateStore, chainEnabled)
 	_, err = senderMatcher.Matches(p2pCtx, txHash, networkID, swarmAddress, true)
 	if err != nil {
 		return nil, fmt.Errorf("identity transaction verification failed: %w", err)
 	}
 
+	var bootnodes []ma.Multiaddr
+
+	for _, a := range o.Bootnodes {
+		addr, err := ma.NewMultiaddr(a)
+		if err != nil {
+			logger.Debugf("multiaddress fail %s: %v", a, err)
+			logger.Warningf("invalid bootnode address %s", a)
+			continue
+		}
+
+		bootnodes = append(bootnodes, addr)
+	}
+
+	// Perform checks related to payment threshold calculations here to not duplicate
+	// the checks in bootstrap process
+	paymentThreshold, ok := new(big.Int).SetString(o.PaymentThreshold, 10)
+	if !ok {
+		return nil, fmt.Errorf("invalid payment threshold: %s", paymentThreshold)
+	}
+
+	if paymentThreshold.Cmp(big.NewInt(minPaymentThreshold)) < 0 {
+		return nil, fmt.Errorf("payment threshold below minimum generally accepted value, need at least %d", minPaymentThreshold)
+	}
+
+	if paymentThreshold.Cmp(big.NewInt(maxPaymentThreshold)) > 0 {
+		return nil, fmt.Errorf("payment threshold above maximum generally accepted value, needs to be reduced to at most %d", maxPaymentThreshold)
+	}
+
+	if o.PaymentTolerance < 0 {
+		return nil, fmt.Errorf("invalid payment tolerance: %d", o.PaymentTolerance)
+	}
+
+	if o.PaymentEarly > 100 || o.PaymentEarly < 0 {
+		return nil, fmt.Errorf("invalid payment early: %d", o.PaymentEarly)
+	}
+
+	var initBatchState *postage.ChainSnapshot
+	// Bootstrap node with postage snapshot only if it is running on mainnet, is a fresh
+	// install or explicitly asked by user to resync
+	if networkID == mainnetNetworkID && o.UsePostageSnapshot && (!batchStoreExists || o.Resync) {
+		start := time.Now()
+		logger.Info("cold postage start detected. fetching postage stamp snapshot from swarm")
+		initBatchState, err = bootstrapNode(
+			addr,
+			swarmAddress,
+			txHash,
+			chainID,
+			overlayEthAddress,
+			addressbook,
+			bootnodes,
+			lightNodes,
+			senderMatcher,
+			chequebookService,
+			chequeStore,
+			cashoutService,
+			transactionService,
+			stateStore,
+			signer,
+			networkID,
+			logging.New(io.Discard, 0),
+			libp2pPrivateKey,
+			o,
+		)
+		logger.Infof("bootstrapper took %s", time.Since(start))
+		if err != nil {
+			logger.Errorf("bootstrapper failed to fetch batch state: %v", err)
+		}
+	}
+
 	p2ps, err := libp2p.New(p2pCtx, signer, networkID, swarmAddress, addr, addressbook, stateStore, lightNodes, senderMatcher, logger, tracer, libp2p.Options{
-		PrivateKey:     libp2pPrivateKey,
-		NATAddr:        o.NATAddr,
-		EnableWS:       o.EnableWS,
-		WelcomeMessage: o.WelcomeMessage,
-		FullNode:       o.FullNodeMode,
-		Transaction:    txHash,
+		PrivateKey:      libp2pPrivateKey,
+		NATAddr:         o.NATAddr,
+		EnableWS:        o.EnableWS,
+		WelcomeMessage:  o.WelcomeMessage,
+		FullNode:        o.FullNodeMode,
+		Transaction:     txHash,
+		ValidateOverlay: chainEnabled,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("p2p service: %w", err)
 	}
+
+	apiService.SetP2P(p2ps)
+
 	b.p2pService = p2ps
 	b.p2pHalter = p2ps
-
-	var unreserveFn func([]byte, uint8) (uint64, error)
-	var evictFn = func(b []byte) error {
-		_, err := unreserveFn(b, swarm.MaxPO+1)
-		return err
-	}
-
-	batchStore, err := batchstore.New(stateStore, evictFn, logger)
-	if err != nil {
-		return nil, fmt.Errorf("batchstore: %w", err)
-	}
 
 	// localstore depends on batchstore
 	var path string
@@ -452,13 +602,12 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 
 	var (
 		postageContractService postagecontract.Interface
-		pledgeContractService  pledge.Service
-		rewardContractService  reward.Service
 		batchSvc               postage.EventUpdater
 		eventListener          postage.Listener
 	)
 
 	var postageSyncStart uint64 = 0
+
 	chainCfg, found := config.GetChainConfig(chainID)
 	postageContractAddress, startBlock := chainCfg.PostageStamp, chainCfg.StartBlock
 	if o.PostageContractAddress != "" {
@@ -473,17 +622,17 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 		postageSyncStart = startBlock
 	}
 
-	eventListener = listener.New(logger, swapBackend, postageContractAddress, o.BlockTime, &pidKiller{node: b}, postageSyncingStallingTimeout, postageSyncingBackoffTimeout)
+	eventListener = listener.New(b.syncingStopped, logger, chainBackend, postageContractAddress, o.BlockTime, postageSyncingStallingTimeout, postageSyncingBackoffTimeout)
 	b.listenerCloser = eventListener
 
 	batchSvc, err = batchservice.New(stateStore, batchStore, logger, eventListener, overlayEthAddress.Bytes(), post, sha3.New256, o.Resync)
 	if err != nil {
-		return nil, fmt.Errorf("batch service load: %w", err)
+		return nil, err
 	}
 
-	erc20Address, err := postagecontract.LookupERC20Address(p2pCtx, transactionService, postageContractAddress)
+	erc20Address, err := postagecontract.LookupERC20Address(p2pCtx, transactionService, postageContractAddress, chainEnabled)
 	if err != nil {
-		return nil, fmt.Errorf("postage contract lookup erc20 address: %w", err)
+		return nil, err
 	}
 
 	postageContractService = postagecontract.New(
@@ -493,39 +642,7 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 		transactionService,
 		post,
 		batchStore,
-	)
-
-	pledgeAddress := chainCfg.PledgeAddress
-	if o.PledgeAddress != "" {
-		if !common.IsHexAddress(o.PledgeAddress) {
-			return nil, errors.New("malformed pledge address")
-		}
-		pledgeAddress = common.HexToAddress(o.PledgeAddress)
-	} else if !found {
-		return nil, errors.New("no known pledge addresses for this network")
-	}
-
-	pledgeContractService = pledge.New(
-		stateStore,
-		swapBackend,
-		transactionService,
-		pledgeAddress,
-	)
-
-	rewardAddress := chainCfg.RewardAddress
-	if o.RewardAddress != "" {
-		if !common.IsHexAddress(o.RewardAddress) {
-			return nil, errors.New("malformed reward address")
-		}
-		rewardAddress = common.HexToAddress(o.RewardAddress)
-	} else if !found {
-		return nil, errors.New("no known reward addresses for this network")
-	}
-	rewardContractService = reward.New(
-		stateStore,
-		swapBackend,
-		transactionService,
-		rewardAddress,
+		chainEnabled,
 	)
 
 	if natManager := p2ps.NATManager(); natManager != nil {
@@ -559,19 +676,6 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 	}
 	b.hiveCloser = hive
 
-	var bootnodes []ma.Multiaddr
-
-	for _, a := range o.Bootnodes {
-		addr, err := ma.NewMultiaddr(a)
-		if err != nil {
-			logger.Debugf("multiaddress fail %s: %v", a, err)
-			logger.Warningf("invalid bootnode address %s", a)
-			continue
-		}
-
-		bootnodes = append(bootnodes, addr)
-	}
-
 	var swapService *swap.Service
 
 	metricsDB, err := shed.NewDBWrap(stateStore.DB())
@@ -580,7 +684,7 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 	}
 
 	kad, err := kademlia.New(swarmAddress, addressbook, hive, p2ps, pingPong, metricsDB, logger,
-		kademlia.Options{Bootnodes: bootnodes, BootnodeMode: o.BootnodeMode, StaticNodes: o.StaticNodes})
+		kademlia.Options{Bootnodes: bootnodes, BootnodeMode: o.BootnodeMode, StaticNodes: o.StaticNodes, IgnoreRadius: !chainEnabled})
 	if err != nil {
 		return nil, fmt.Errorf("unable to create kademlia: %w", err)
 	}
@@ -590,8 +694,8 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 	p2ps.SetPickyNotifier(kad)
 	batchStore.SetRadiusSetter(kad)
 
-	if batchSvc != nil {
-		syncedChan, err := batchSvc.Start(postageSyncStart)
+	if batchSvc != nil && chainEnabled {
+		syncedChan, err := batchSvc.Start(postageSyncStart, initBatchState)
 		if err != nil {
 			return nil, fmt.Errorf("unable to start batch service: %w", err)
 		}
@@ -602,29 +706,19 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 		// interrupts at this stage of the application lifecycle. some changes
 		// would be needed on the cmd level to support context cancellation at
 		// this stage
-		<-syncedChan
-
-	}
-
-	minThreshold := big.NewInt(2 * refreshRate)
-	maxThreshold := big.NewInt(24 * refreshRate)
-
-	paymentThreshold, ok := new(big.Int).SetString(o.PaymentThreshold, 10)
-	if !ok {
-		return nil, fmt.Errorf("invalid payment threshold: %s", paymentThreshold)
+		select {
+		case err = <-syncedChan:
+			if err != nil {
+				return nil, err
+			}
+		case <-interrupt:
+			return nil, ErrInterruped
+		}
 	}
 
 	pricer := pricer.NewFixedPricer(swarmAddress, basePrice)
 
-	if paymentThreshold.Cmp(minThreshold) < 0 {
-		return nil, fmt.Errorf("payment threshold below minimum generally accepted value, need at least %s", minThreshold)
-	}
-
-	if paymentThreshold.Cmp(maxThreshold) > 0 {
-		return nil, fmt.Errorf("payment threshold above maximum generally accepted value, needs to be reduced to at most %s", maxThreshold)
-	}
-
-	pricing := pricing.New(p2ps, logger, paymentThreshold, minThreshold)
+	pricing := pricing.New(p2ps, logger, paymentThreshold, big.NewInt(minPaymentThreshold))
 
 	if err = p2ps.AddProtocol(pricing.Protocol()); err != nil {
 		return nil, fmt.Errorf("pricing service: %w", err)
@@ -637,14 +731,6 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 
 	for _, addr := range addrs {
 		logger.Debugf("p2p address: %s", addr)
-	}
-
-	if o.PaymentTolerance < 0 {
-		return nil, fmt.Errorf("invalid payment tolerance: %d", o.PaymentTolerance)
-	}
-
-	if o.PaymentEarly > 100 || o.PaymentEarly < 0 {
-		return nil, fmt.Errorf("invalid payment early: %d", o.PaymentEarly)
 	}
 
 	acc, err := accounting.NewAccounting(
@@ -677,7 +763,7 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 
 	acc.SetRefreshFunc(pseudosettleService.Pay)
 
-	if o.SwapEnable {
+	if o.SwapEnable && chainEnabled {
 		var priceOracle priceoracle.Service
 		swapService, priceOracle, err = InitSwap(
 			p2ps,
@@ -697,7 +783,10 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 			return nil, err
 		}
 		b.priceOracleCloser = priceOracle
-		acc.SetPayFunc(swapService.Pay)
+
+		if o.ChequebookEnable {
+			acc.SetPayFunc(swapService.Pay)
+		}
 	}
 
 	pricing.SetPaymentThresholdObserver(acc)
@@ -709,30 +798,17 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 	pssService := pss.New(pssPrivateKey, logger)
 	b.pssCloser = pssService
 
-	var ns storage.Storer
-	if o.GlobalPinningEnabled {
-		// create recovery callback for content repair
-		recoverFunc := recovery.NewCallback(pssService)
-		ns = netstore.New(storer, validStamp, recoverFunc, retrieve, logger)
-	} else {
-		ns = netstore.New(storer, validStamp, nil, retrieve, logger)
-	}
+	var ns storage.Storer = netstore.New(storer, validStamp, retrieve, logger)
 	b.nsCloser = ns
 
 	traversalService := traversal.New(ns)
 
 	pinningService := pinning.NewService(storer, stateStore, traversalService)
 
-	pushSyncProtocol := pushsync.New(networkID, swarmAddress, blockHash, p2ps, storer, kad, tagService, o.FullNodeMode, pssService.TryUnwrap, validStamp, logger, acc, pricer, signer, tracer, warmupTime, o.ReceiptEndPoint)
+	pushSyncProtocol := pushsync.New(swarmAddress, blockHash, p2ps, storer, kad, tagService, o.FullNodeMode, pssService.TryUnwrap, validStamp, logger, acc, pricer, signer, tracer, warmupTime, networkID, o.ReceiptEndPoint)
 
 	// set the pushSyncer in the PSS
 	pssService.SetPushSyncer(pushSyncProtocol)
-
-	if o.GlobalPinningEnabled {
-		// register function for chunk repair upon receiving a trojan message
-		chunkRepairHandler := recovery.NewRepairHandler(ns, logger, pushSyncProtocol)
-		b.recoveryHandleCleanup = pssService.Register(recovery.Topic, chunkRepairHandler)
-	}
 
 	pusherService := pusher.New(networkID, storer, kad, pushSyncProtocol, validStamp, tagService, logger, tracer, warmupTime)
 	b.pusherCloser = pusherService
@@ -743,7 +819,7 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 	b.pullSyncCloser = pullSyncProtocol
 
 	var pullerService *puller.Puller
-	if o.FullNodeMode {
+	if o.FullNodeMode && !o.BootnodeMode {
 		pullerService = puller.New(stateStore, kad, pullSyncProtocol, logger, puller.Options{}, warmupTime)
 		b.pullerCloser = pullerService
 	}
@@ -774,127 +850,175 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 	multiResolver := multiresolver.NewMultiResolver(
 		multiresolver.WithConnectionConfigs(o.ResolverConnectionCfgs),
 		multiresolver.WithLogger(o.Logger),
+		multiresolver.WithDefaultCIDResolver(),
 	)
 	b.resolverCloser = multiResolver
 	var chainSyncer *chainsyncer.ChainSyncer
 
 	if o.FullNodeMode {
-		cs, err := chainsync.New(p2ps, swapBackend)
+		cs, err := chainsync.New(p2ps, chainBackend)
 		if err != nil {
 			return nil, fmt.Errorf("new chainsync: %w", err)
 		}
 		if err = p2ps.AddProtocol(cs.Protocol()); err != nil {
 			return nil, fmt.Errorf("chainsync protocol: %w", err)
 		}
-		chainSyncer, err = chainsyncer.New(swapBackend, cs, kad, p2ps, logger, nil)
+		chainSyncer, err = chainsyncer.New(chainBackend, cs, kad, p2ps, logger, nil)
 		if err != nil {
 			return nil, fmt.Errorf("new chainsyncer: %w", err)
 		}
 
 		b.chainSyncerCloser = chainSyncer
 	}
-	var apiService api.Service
+
+	feedFactory := factory.New(ns)
+	steward := steward.New(storer, traversalService, retrieve, pushSyncProtocol)
+
+	extraOpts := api.ExtraOptions{
+		Pingpong:         pingPong,
+		TopologyDriver:   kad,
+		LightNodes:       lightNodes,
+		Accounting:       acc,
+		Pseudosettle:     pseudosettleService,
+		Swap:             swapService,
+		Chequebook:       chequebookService,
+		BlockTime:        big.NewInt(int64(o.BlockTime)),
+		Tags:             tagService,
+		Storer:           ns,
+		Resolver:         multiResolver,
+		Pss:              pssService,
+		TraversalService: traversalService,
+		Pinning:          pinningService,
+		FeedFactory:      feedFactory,
+		Post:             post,
+		PostageContract:  postageContractService,
+		Steward:          steward,
+	}
+
 	if o.APIAddr != "" {
-		// API server
-		feedFactory := factory.New(ns)
-		steward := steward.New(storer, traversalService, retrieve, pushSyncProtocol)
-		apiService = api.New(tagService, ns, multiResolver, pssService, traversalService, pinningService, feedFactory, post, postageContractService, steward, signer, authenticator, logger, tracer, api.Options{
+		if apiService == nil {
+			apiService = api.New(*publicKey, pssPrivateKey.PublicKey, overlayEthAddress, logger, transactionService, batchStore, o.GatewayMode, hopNodeMode, o.ChequebookEnable, o.SwapEnable, o.CORSAllowedOrigins)
+		}
+
+		chunkC := apiService.Configure(signer, authenticator, tracer, api.Options{
 			CORSAllowedOrigins: o.CORSAllowedOrigins,
 			GatewayMode:        o.GatewayMode,
 			WsPingPeriod:       60 * time.Second,
 			Restricted:         o.Restricted,
-		})
-		apiListener, err := net.Listen("tcp", o.APIAddr)
-		if err != nil {
-			return nil, fmt.Errorf("api listener: %w", err)
-		}
+		}, extraOpts, chainID, chainBackend, erc20Service)
 
-		apiServer := &http.Server{
-			IdleTimeout:       30 * time.Second,
-			ReadHeaderTimeout: 3 * time.Second,
-			Handler:           apiService,
-			ErrorLog:          log.New(b.errorLogWriter, "", 0),
-		}
+		pusherService.AddFeed(chunkC)
 
-		go func() {
-			logger.Infof("api address: %s", apiListener.Addr())
+		apiService.MountAPI()
 
-			if err := apiServer.Serve(apiListener); err != nil && err != http.ErrServerClosed {
-				logger.Debugf("api server: %v", err)
-				logger.Error("unable to serve api")
+		if !o.Restricted {
+			apiServer := &http.Server{
+				IdleTimeout:       30 * time.Second,
+				ReadHeaderTimeout: 3 * time.Second,
+				Handler:           apiService,
+				ErrorLog:          log.New(b.errorLogWriter, "", 0),
 			}
-		}()
 
-		b.apiServer = apiServer
-		b.apiCloser = apiService
+			apiListener, err := net.Listen("tcp", o.APIAddr)
+			if err != nil {
+				return nil, fmt.Errorf("api listener: %w", err)
+			}
+
+			go func() {
+				logger.Infof("api address: %s", apiListener.Addr())
+				if err := apiServer.Serve(apiListener); err != nil && err != http.ErrServerClosed {
+					logger.Debugf("api server: %v", err)
+					logger.Error("unable to serve api")
+				}
+			}()
+
+			b.apiServer = apiServer
+			b.apiCloser = apiService
+		} else {
+			// in Restricted mode we mount debug endpoints
+			apiService.MountDebug(o.Restricted)
+		}
 	}
 
-	if debugAPIService != nil {
+	if o.DebugAPIAddr != "" {
 		// register metrics from components
-		debugAPIService.MustRegisterMetrics(p2ps.Metrics()...)
-		debugAPIService.MustRegisterMetrics(pingPong.Metrics()...)
-		debugAPIService.MustRegisterMetrics(acc.Metrics()...)
-		debugAPIService.MustRegisterMetrics(storer.Metrics()...)
-		debugAPIService.MustRegisterMetrics(kad.Metrics()...)
+		debugService.MustRegisterMetrics(p2ps.Metrics()...)
+		debugService.MustRegisterMetrics(pingPong.Metrics()...)
+		debugService.MustRegisterMetrics(acc.Metrics()...)
+		debugService.MustRegisterMetrics(storer.Metrics()...)
+		debugService.MustRegisterMetrics(kad.Metrics()...)
 
 		if pullerService != nil {
-			debugAPIService.MustRegisterMetrics(pullerService.Metrics()...)
+			debugService.MustRegisterMetrics(pullerService.Metrics()...)
 		}
 
-		debugAPIService.MustRegisterMetrics(pushSyncProtocol.Metrics()...)
-		debugAPIService.MustRegisterMetrics(pusherService.Metrics()...)
-		debugAPIService.MustRegisterMetrics(pullSyncProtocol.Metrics()...)
-		debugAPIService.MustRegisterMetrics(pullStorage.Metrics()...)
-		debugAPIService.MustRegisterMetrics(retrieve.Metrics()...)
-		debugAPIService.MustRegisterMetrics(lightNodes.Metrics()...)
-		debugAPIService.MustRegisterMetrics(hive.Metrics()...)
+		debugService.MustRegisterMetrics(pushSyncProtocol.Metrics()...)
+		debugService.MustRegisterMetrics(pusherService.Metrics()...)
+		debugService.MustRegisterMetrics(pullSyncProtocol.Metrics()...)
+		debugService.MustRegisterMetrics(pullStorage.Metrics()...)
+		debugService.MustRegisterMetrics(retrieve.Metrics()...)
+		debugService.MustRegisterMetrics(lightNodes.Metrics()...)
+		debugService.MustRegisterMetrics(hive.Metrics()...)
 
 		if bs, ok := batchStore.(metrics.Collector); ok {
-			debugAPIService.MustRegisterMetrics(bs.Metrics()...)
+			debugService.MustRegisterMetrics(bs.Metrics()...)
 		}
-
 		if eventListener != nil {
 			if ls, ok := eventListener.(metrics.Collector); ok {
-				debugAPIService.MustRegisterMetrics(ls.Metrics()...)
+				debugService.MustRegisterMetrics(ls.Metrics()...)
 			}
 		}
-
 		if pssServiceMetrics, ok := pssService.(metrics.Collector); ok {
-			debugAPIService.MustRegisterMetrics(pssServiceMetrics.Metrics()...)
+			debugService.MustRegisterMetrics(pssServiceMetrics.Metrics()...)
 		}
-
-		if swapBackendMetrics, ok := swapBackend.(metrics.Collector); ok {
-			debugAPIService.MustRegisterMetrics(swapBackendMetrics.Metrics()...)
+		if swapBackendMetrics, ok := chainBackend.(metrics.Collector); ok {
+			debugService.MustRegisterMetrics(swapBackendMetrics.Metrics()...)
 		}
-
 		if apiService != nil {
-			debugAPIService.MustRegisterMetrics(apiService.Metrics()...)
+			debugService.MustRegisterMetrics(apiService.Metrics()...)
 		}
 		if l, ok := logger.(metrics.Collector); ok {
-			debugAPIService.MustRegisterMetrics(l.Metrics()...)
+			debugService.MustRegisterMetrics(l.Metrics()...)
 		}
-
-		debugAPIService.MustRegisterMetrics(pseudosettleService.Metrics()...)
-
+		if nsMetrics, ok := ns.(metrics.Collector); ok {
+			debugService.MustRegisterMetrics(nsMetrics.Metrics()...)
+		}
+		debugService.MustRegisterMetrics(pseudosettleService.Metrics()...)
 		if swapService != nil {
-			debugAPIService.MustRegisterMetrics(swapService.Metrics()...)
+			debugService.MustRegisterMetrics(swapService.Metrics()...)
 		}
 		if chainSyncer != nil {
-			debugAPIService.MustRegisterMetrics(chainSyncer.Metrics()...)
+			debugService.MustRegisterMetrics(chainSyncer.Metrics()...)
 		}
-		// inject dependencies and configure full debug api http path routes
-		debugAPIService.Configure(swarmAddress, p2ps, pingPong, kad, lightNodes, storer, tagService, acc, pseudosettleService, o.SwapEnable, swapService, chequebookService, batchStore, post, postageContractService, pledgeContractService, rewardContractService, traversalService)
+
+		debugService.Configure(signer, authenticator, tracer, api.Options{
+			CORSAllowedOrigins: o.CORSAllowedOrigins,
+			GatewayMode:        o.GatewayMode,
+			WsPingPeriod:       60 * time.Second,
+			Restricted:         o.Restricted,
+		}, extraOpts, chainID, chainBackend, erc20Service)
+
+		debugService.SetP2P(p2ps)
+		debugService.SetSwarmAddress(&swarmAddress)
+		debugService.MountDebug(false)
 	}
 
 	if err := kad.Start(p2pCtx); err != nil {
 		return nil, err
 	}
-	p2ps.Ready()
+
+	if err := p2ps.Ready(); err != nil {
+		return nil, err
+	}
 
 	return b, nil
 }
 
-func (b *Node) Shutdown(ctx context.Context) error {
+func (b *Node) SyncingStopped() chan struct{} {
+	return b.syncingStopped
+}
+
+func (b *Node) Shutdown() error {
 	var mErr error
 
 	// if a shutdown is already in process, return here
@@ -908,11 +1032,15 @@ func (b *Node) Shutdown(ctx context.Context) error {
 
 	// halt kademlia while shutting down other
 	// components.
-	b.topologyHalter.Halt()
+	if b.topologyHalter != nil {
+		b.topologyHalter.Halt()
+	}
 
 	// halt p2p layer from accepting new connections
 	// while shutting down other components
-	b.p2pHalter.Halt()
+	if b.p2pHalter != nil {
+		b.p2pHalter.Halt()
+	}
 	// tryClose is a convenient closure which decrease
 	// repetitive io.Closer tryClose procedure.
 	tryClose := func(c io.Closer, errMsg string) {
@@ -925,6 +1053,9 @@ func (b *Node) Shutdown(ctx context.Context) error {
 	}
 
 	tryClose(b.apiCloser, "api")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 
 	var eg errgroup.Group
 	if b.apiServer != nil {
@@ -948,9 +1079,6 @@ func (b *Node) Shutdown(ctx context.Context) error {
 		mErr = multierror.Append(mErr, err)
 	}
 
-	if b.recoveryHandleCleanup != nil {
-		b.recoveryHandleCleanup()
-	}
 	var wg sync.WaitGroup
 	wg.Add(7)
 	go func() {
@@ -1022,27 +1150,17 @@ func (b *Node) Shutdown(ctx context.Context) error {
 	return mErr
 }
 
-// pidKiller is used to issue a forced shut down of the node from sub modules. The issue with using the
-// node's Shutdown method is that it only shuts down the node and does not exit the start process
-// which is waiting on the os.Signals. This is not desirable, but currently hop node cannot handle
-// rate-limiting blockchain API calls properly. We will shut down the node in this case to allow the
-// user to rectify the API issues (by adjusting limits or using a different one). There is no platform
-// agnostic way to trigger os.Signals in go unfortunately. Which is why we will use the process.Kill
-// approach which works on windows as well.
-type pidKiller struct {
-	node *Node
-}
-
 var ErrShutdownInProgress error = errors.New("shutdown in progress")
 
-func (p *pidKiller) Shutdown(ctx context.Context) error {
-	err := p.node.Shutdown(ctx)
-	if err != nil {
-		return err
+func isChainEnabled(o *Options, swapEndpoint string, logger logging.Logger) bool {
+	chainDisabled := swapEndpoint == ""
+	lightMode := !o.FullNodeMode
+
+	if lightMode && chainDisabled { // ultra light mode is LightNode mode with chain disabled
+		logger.Info("starting with a disabled chain backend")
+		return false
 	}
-	ps, err := os.FindProcess(syscall.Getpid())
-	if err != nil {
-		return err
-	}
-	return ps.Kill()
+
+	logger.Info("starting with an enabled chain backend")
+	return true // all other modes operate require chain enabled
 }

@@ -3,7 +3,7 @@ info:
   version: 2.0.3
   title: Common Data Types
   description: |
-    \*****bzzz*****
+    \*****hop*****
 
 externalDocs:
   description: Browse the documentation 
@@ -76,7 +76,7 @@ components:
           items:
             $ref: "#/components/schemas/Balance"
 
-    BzzTopology:
+    HopTopology:
       type: object
       properties:
         baseAddr:
@@ -368,7 +368,7 @@ components:
     Node:
       type: object
       properties:
-        beeMode:
+        hopMode:
           type: string
           enum: [light, full, dev]
           description: >
@@ -617,7 +617,7 @@ components:
     WalletResponse:
       type: object
       properties:
-        bzz:
+        hop:
           $ref: "#/components/schemas/BigInt"
         xDai:
           $ref: "#/components/schemas/BigInt"

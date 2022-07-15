@@ -1,7 +1,6 @@
 package intervalstore
 
 import (
-	"os"
 	"testing"
 
 	"github.com/redesblock/hop/core/statestore/leveldb"
@@ -16,11 +15,7 @@ func TestInmemoryStore(t *testing.T) {
 
 // TestDBStore tests basic functionality of DBStore.
 func TestDBStore(t *testing.T) {
-	dir, err := os.MkdirTemp("", "intervals_test_db_store")
-	if err != nil {
-		panic(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	store, err := leveldb.NewStateStore(dir, nil)
 	if err != nil {

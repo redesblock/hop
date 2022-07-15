@@ -6,13 +6,11 @@ import (
 	"fmt"
 	"math/big"
 
-	hopabi "github.com/redesblock/hop/contracts/abi"
-
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	hopabi "github.com/redesblock/hop/contracts/abi"
 	"github.com/redesblock/hop/core/sctx"
 	"github.com/redesblock/hop/core/transaction"
-
 	"golang.org/x/net/context"
 )
 
@@ -56,6 +54,7 @@ var currentDeployVersion []byte = common.FromHex(hopabi.SimpleSwapFactoryDeploye
 // the bytecode of factories from which we accept chequebooks
 var supportedVersions = [][]byte{
 	currentDeployVersion,
+	common.FromHex(hopabi.SimpleSwapFactoryDeployedBin),
 }
 
 // NewFactory creates a new factory service for the provided factory contract.
@@ -79,7 +78,7 @@ func (c *factory) Deploy(ctx context.Context, issuer common.Address, defaultHard
 		To:          &c.address,
 		Data:        callData,
 		GasPrice:    sctx.GetGasPrice(ctx),
-		GasLimit:    2500000,
+		GasLimit:    175000,
 		Value:       big.NewInt(0),
 		Description: "chequebook deployment",
 	}

@@ -25,10 +25,11 @@ const (
 	dbSchemaFlushBlock      = "flushblock"
 	dbSchemaSwapAddr        = "swapaddr"
 	dBSchemaKademliaMetrics = "kademlia-metrics"
+	dBSchemaBatchStore      = "batchstore"
 )
 
 var (
-	dbSchemaCurrent = dBSchemaKademliaMetrics
+	dbSchemaCurrent = dBSchemaBatchStore
 )
 
 type migration struct {
@@ -46,10 +47,19 @@ var schemaMigrations = []migration{
 	{name: dbSchemaFlushBlock, fn: migrateFB},
 	{name: dbSchemaSwapAddr, fn: migrateSwap},
 	{name: dBSchemaKademliaMetrics, fn: migrateKademliaMetrics},
+	{name: dBSchemaBatchStore, fn: migrateBatchstore},
 }
 
 func migrateFB(s *Store) error {
 	collectedKeys, err := collectKeys(s, "blocklist-")
+	if err != nil {
+		return err
+	}
+	return deleteKeys(s, collectedKeys)
+}
+
+func migrateBatchstore(s *Store) error {
+	collectedKeys, err := collectKeys(s, "batchstore_")
 	if err != nil {
 		return err
 	}
@@ -240,11 +250,11 @@ func getMigrations(currentSchema, targetSchema string, allSchemeMigrations []mig
 	return migrations, nil
 }
 
-func collectKeysExcept(s *Store, prefix []string) (keys []string, err error) {
+func collectKeysExcept(s *Store, prefixesToPreserve []string) (keys []string, err error) {
 	if err := s.Iterate("", func(k, v []byte) (bool, error) {
 		stk := string(k)
 		has := false
-		for _, v := range prefix {
+		for _, v := range prefixesToPreserve {
 			if strings.HasPrefix(stk, v) {
 				has = true
 				break
@@ -279,7 +289,6 @@ func deleteKeys(s *Store, keys []string) error {
 		if err != nil {
 			return fmt.Errorf("error deleting key %s: %w", v, err)
 		}
-		s.logger.Debugf("deleted key %s", v)
 	}
 	s.logger.Debugf("deleted keys: %d", len(keys))
 	return nil
@@ -287,13 +296,18 @@ func deleteKeys(s *Store, keys []string) error {
 
 // Nuke the store so that only the bare essential entries are
 // left. Careful!
-func (s *Store) Nuke() error {
+func (s *Store) Nuke(forgetStamps bool) error {
 	var (
-		keys     []string
-		prefixes = []string{"accounting", "pseudosettle", "swap", "non-mineable-overlay"}
-		err      error
+		keys               []string
+		prefixesToPreserve = []string{"accounting", "pseudosettle", "swap", "non-mineable-overlay"}
+		err                error
 	)
-	keys, err = collectKeysExcept(s, prefixes)
+
+	if !forgetStamps {
+		prefixesToPreserve = append(prefixesToPreserve, "postage")
+	}
+
+	keys, err = collectKeysExcept(s, prefixesToPreserve)
 	if err != nil {
 		return fmt.Errorf("collect keys except: %w", err)
 	}

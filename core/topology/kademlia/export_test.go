@@ -2,7 +2,6 @@ package kademlia
 
 var (
 	TimeToRetry                 = &timeToRetry
-	QuickSaturationPeers        = &quickSaturationPeers
 	SaturationPeers             = &saturationPeers
 	OverSaturationPeers         = &overSaturationPeers
 	BootnodeOverSaturationPeers = &bootNodeOverSaturationPeers
@@ -12,6 +11,7 @@ var (
 	}
 	GenerateCommonBinPrefixes = generateCommonBinPrefixes
 	PeerPingPollTime          = &peerPingPollTime
+	BitSuffixLength           = defaultBitSuffixLength
 )
 
 type PeerFilterFunc = peerFilterFunc

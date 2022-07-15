@@ -4,12 +4,9 @@ package sctx
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"math/big"
-	"strings"
 
-	"github.com/redesblock/hop/core/pss"
 	"github.com/redesblock/hop/core/tags"
 )
 
@@ -19,12 +16,11 @@ var (
 )
 
 type (
-	HTTPRequestIDKey  struct{}
-	requestHostKey    struct{}
-	tagKey            struct{}
-	targetsContextKey struct{}
-	gasPriceKey       struct{}
-	gasLimitKey       struct{}
+	HTTPRequestIDKey struct{}
+	requestHostKey   struct{}
+	tagKey           struct{}
+	gasPriceKey      struct{}
+	gasLimitKey      struct{}
 )
 
 // SetHost sets the http request host in the context
@@ -53,35 +49,6 @@ func GetTag(ctx context.Context) *tags.Tag {
 		return nil
 	}
 	return v
-}
-
-// SetTargets set the target string in the context to be used downstream in netstore
-func SetTargets(ctx context.Context, targets string) context.Context {
-	return context.WithValue(ctx, targetsContextKey{}, targets)
-}
-
-// GetTargets returns the specific target pinners for a corresponding chunk by
-// reading the prefix targets sent in the download API.
-func GetTargets(ctx context.Context) pss.Targets {
-	targetString, ok := ctx.Value(targetsContextKey{}).(string)
-	if !ok {
-		return nil
-	}
-
-	prefixes := strings.Split(targetString, ",")
-	var targets pss.Targets
-	for _, prefix := range prefixes {
-		var target pss.Target
-		target, err := hex.DecodeString(prefix)
-		if err != nil {
-			continue
-		}
-		targets = append(targets, target)
-	}
-	if len(targets) <= 0 {
-		return nil
-	}
-	return targets
 }
 
 func SetGasLimit(ctx context.Context, limit uint64) context.Context {

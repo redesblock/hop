@@ -7,6 +7,7 @@ import (
 
 	"github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/node"
+	"github.com/redesblock/hop/core/settlement/swap/erc20"
 	"github.com/spf13/cobra"
 )
 
@@ -54,8 +55,10 @@ func (c *command) initDeployCmd() error {
 				logger,
 				stateStore,
 				swapEndpoint,
+				0,
 				signer,
 				blocktime,
+				true,
 			)
 			if err != nil {
 				return err
@@ -75,6 +78,13 @@ func (c *command) initDeployCmd() error {
 				return err
 			}
 
+			erc20Address, err := chequebookFactory.ERC20Address(ctx)
+			if err != nil {
+				return err
+			}
+
+			erc20Service := erc20.New(transactionService, erc20Address)
+
 			_, err = node.InitChequebookService(
 				ctx,
 				logger,
@@ -87,6 +97,7 @@ func (c *command) initDeployCmd() error {
 				chequebookFactory,
 				swapInitialDeposit,
 				deployGasPrice,
+				erc20Service,
 			)
 			if err != nil {
 				return err

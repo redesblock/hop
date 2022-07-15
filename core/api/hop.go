@@ -30,7 +30,7 @@ import (
 	"github.com/redesblock/hop/core/tracing"
 )
 
-func (s *server) hopUploadHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Service) hopUploadHandler(w http.ResponseWriter, r *http.Request) {
 	logger := tracing.NewLoggerWithTraceID(r.Context(), s.logger)
 
 	contentType := r.Header.Get(contentTypeHeader)
@@ -42,15 +42,7 @@ func (s *server) hopUploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	batch, err := requestPostageBatchId(r)
-	if err != nil {
-		logger.Debugf("hop upload: postage batch id: %v", err)
-		logger.Error("hop upload: postage batch id")
-		jsonhttp.BadRequest(w, "invalid postage batch id")
-		return
-	}
-
-	putter, err := newStamperPutter(s.storer, s.post, s.signer, batch)
+	putter, wait, err := s.newStamperPutter(r)
 	if err != nil {
 		logger.Debugf("hop upload: putter: %v", err)
 		logger.Error("hop upload: putter")
@@ -67,10 +59,10 @@ func (s *server) hopUploadHandler(w http.ResponseWriter, r *http.Request) {
 
 	isDir := r.Header.Get(SwarmCollectionHeader)
 	if strings.ToLower(isDir) == "true" || mediaType == multiPartFormData {
-		s.dirUploadHandler(w, r, putter)
+		s.dirUploadHandler(w, r, putter, wait)
 		return
 	}
-	s.fileUploadHandler(w, r, putter)
+	s.fileUploadHandler(w, r, putter, wait)
 }
 
 // fileUploadResponse is returned when an HTTP request to upload a file is successful
@@ -80,7 +72,7 @@ type hopUploadResponse struct {
 
 // fileUploadHandler uploads the file and its metadata supplied in the file body and
 // the headers
-func (s *server) fileUploadHandler(w http.ResponseWriter, r *http.Request, storer storage.Storer) {
+func (s *Service) fileUploadHandler(w http.ResponseWriter, r *http.Request, storer storage.Storer, waitFn func() error) {
 	logger := tracing.NewLoggerWithTraceID(r.Context(), s.logger)
 	var (
 		reader   io.Reader
@@ -226,6 +218,13 @@ func (s *server) fileUploadHandler(w http.ResponseWriter, r *http.Request, store
 		}
 	}
 
+	if err = waitFn(); err != nil {
+		s.logger.Debugf("hop upload: sync chunks: %v", err)
+		s.logger.Error("hop upload: sync chunks")
+		jsonhttp.InternalServerError(w, nil)
+		return
+	}
+
 	w.Header().Set("ETag", fmt.Sprintf("%q", manifestReference.String()))
 	w.Header().Set(SwarmTagHeader, fmt.Sprint(tag.Uid))
 	w.Header().Set("Access-Control-Expose-Headers", SwarmTagHeader)
@@ -234,16 +233,8 @@ func (s *server) fileUploadHandler(w http.ResponseWriter, r *http.Request, store
 	})
 }
 
-func (s *server) hopDownloadHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Service) hopDownloadHandler(w http.ResponseWriter, r *http.Request) {
 	logger := tracing.NewLoggerWithTraceID(r.Context(), s.logger)
-	ls := loadsave.NewReadonly(s.storer)
-	feedDereferenced := false
-
-	targets := r.URL.Query().Get("targets")
-	if targets != "" {
-		r = r.WithContext(sctx.SetTargets(r.Context(), targets))
-	}
-	ctx := r.Context()
 
 	nameOrHex := mux.Vars(r)["address"]
 	pathVar := mux.Vars(r)["path"]
@@ -260,6 +251,16 @@ func (s *server) hopDownloadHandler(w http.ResponseWriter, r *http.Request) {
 		jsonhttp.NotFound(w, nil)
 		return
 	}
+
+	s.serveReference(address, pathVar, w, r)
+}
+
+func (s *Service) serveReference(address swarm.Address, pathVar string, w http.ResponseWriter, r *http.Request) {
+	logger := tracing.NewLoggerWithTraceID(r.Context(), s.logger)
+	ls := loadsave.NewReadonly(s.storer)
+	feedDereferenced := false
+
+	ctx := r.Context()
 
 FETCH:
 	// read manifest entry
@@ -402,7 +403,7 @@ FETCH:
 	s.serveManifestEntry(w, r, address, me, !feedDereferenced)
 }
 
-func (s *server) serveManifestEntry(
+func (s *Service) serveManifestEntry(
 	w http.ResponseWriter,
 	r *http.Request,
 	address swarm.Address,
@@ -424,12 +425,8 @@ func (s *server) serveManifestEntry(
 }
 
 // downloadHandler contains common logic for dowloading Swarm file from API
-func (s *server) downloadHandler(w http.ResponseWriter, r *http.Request, reference swarm.Address, additionalHeaders http.Header, etag bool) {
+func (s *Service) downloadHandler(w http.ResponseWriter, r *http.Request, reference swarm.Address, additionalHeaders http.Header, etag bool) {
 	logger := tracing.NewLoggerWithTraceID(r.Context(), s.logger)
-	targets := r.URL.Query().Get("targets")
-	if targets != "" {
-		r = r.WithContext(sctx.SetTargets(r.Context(), targets))
-	}
 
 	reader, l, err := joiner.New(r.Context(), s.storer, reference)
 	if err != nil {
@@ -455,9 +452,6 @@ func (s *server) downloadHandler(w http.ResponseWriter, r *http.Request, referen
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", l))
 	w.Header().Set("Decompressed-Content-Length", fmt.Sprintf("%d", l))
 	w.Header().Set("Access-Control-Expose-Headers", "Content-Disposition")
-	if targets != "" {
-		w.Header().Set(TargetsRecoveryHeader, targets)
-	}
 	http.ServeContent(w, r, "", time.Now(), langos.NewBufferedLangos(reader, lookaheadBufferSize(l)))
 }
 
@@ -482,7 +476,7 @@ func manifestMetadataLoad(
 	return "", false
 }
 
-func (s *server) manifestFeed(
+func (s *Service) manifestFeed(
 	ctx context.Context,
 	m manifest.Interface,
 ) (feeds.Lookup, error) {
@@ -521,7 +515,7 @@ func (s *server) manifestFeed(
 }
 
 // hopPatchHandler endpoint has been deprecated; use stewardship endpoint instead.
-func (s *server) hopPatchHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Service) hopPatchHandler(w http.ResponseWriter, r *http.Request) {
 	nameOrHex := mux.Vars(r)["address"]
 	address, err := s.resolveNameOrAddress(nameOrHex)
 	if err != nil {

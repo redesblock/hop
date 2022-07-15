@@ -9,5 +9,5 @@ var (
 	PriceUpdateTopic        = priceUpdateTopic
 
 	TailSize    = tailSize
-	BatchFactor = batchFactor
+	BatchFactor = defaultBatchFactor
 )

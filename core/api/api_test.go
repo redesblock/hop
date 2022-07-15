@@ -3,18 +3,23 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/gorilla/websocket"
+	accountingmock "github.com/redesblock/hop/core/accounting/mock"
 	"github.com/redesblock/hop/core/api"
 	mockauth "github.com/redesblock/hop/core/auth/mock"
 	"github.com/redesblock/hop/core/crypto"
@@ -23,19 +28,33 @@ import (
 	"github.com/redesblock/hop/core/file/pipeline/builder"
 	"github.com/redesblock/hop/core/jsonhttp/jsonhttptest"
 	"github.com/redesblock/hop/core/logging"
+	p2pmock "github.com/redesblock/hop/core/p2p/mock"
+	"github.com/redesblock/hop/core/pingpong"
 	"github.com/redesblock/hop/core/pinning"
 	"github.com/redesblock/hop/core/postage"
+	mockbatchstore "github.com/redesblock/hop/core/postage/batchstore/mock"
 	mockpost "github.com/redesblock/hop/core/postage/mock"
 	"github.com/redesblock/hop/core/postage/postagecontract"
 	"github.com/redesblock/hop/core/pss"
+	"github.com/redesblock/hop/core/pusher"
 	"github.com/redesblock/hop/core/resolver"
 	resolverMock "github.com/redesblock/hop/core/resolver/mock"
+	"github.com/redesblock/hop/core/settlement/pseudosettle"
+	chequebookmock "github.com/redesblock/hop/core/settlement/swap/chequebook/mock"
+	erc20mock "github.com/redesblock/hop/core/settlement/swap/erc20/mock"
+	swapmock "github.com/redesblock/hop/core/settlement/swap/mock"
 	statestore "github.com/redesblock/hop/core/statestore/mock"
 	"github.com/redesblock/hop/core/steward"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/storage/mock"
+	testingc "github.com/redesblock/hop/core/storage/testing"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
+	"github.com/redesblock/hop/core/topology/lightnode"
+	topologymock "github.com/redesblock/hop/core/topology/mock"
+	"github.com/redesblock/hop/core/tracing"
+	"github.com/redesblock/hop/core/transaction/backendmock"
+	transactionmock "github.com/redesblock/hop/core/transaction/mock"
 	"github.com/redesblock/hop/core/traversal"
 	"resenje.org/web"
 )
@@ -72,10 +91,31 @@ type testServerOptions struct {
 	Steward            steward.Interface
 	WsHeaders          http.Header
 	Authenticator      *mockauth.Auth
+	DebugAPI           bool
 	Restricted         bool
+	DirectUpload       bool
+
+	Overlay         swarm.Address
+	PublicKey       ecdsa.PublicKey
+	PSSPublicKey    ecdsa.PublicKey
+	EthereumAddress common.Address
+	BlockTime       *big.Int
+	P2P             *p2pmock.Service
+	Pingpong        pingpong.Interface
+	TopologyOpts    []topologymock.Option
+	AccountingOpts  []accountingmock.Option
+	ChequebookOpts  []chequebookmock.Option
+	SwapOpts        []swapmock.Option
+	BatchStore      postage.Storer
+	TransactionOpts []transactionmock.Option
+	Traverser       traversal.Traverser
+
+	BackendOpts []backendmock.Option
+	Erc20Opts   []erc20mock.Option
+	ChainID     int64
 }
 
-func newTestServer(t *testing.T, o testServerOptions) (*http.Client, *websocket.Conn, string) {
+func newTestServer(t *testing.T, o testServerOptions) (*http.Client, *websocket.Conn, string, *chanStorer) {
 	t.Helper()
 	pk, _ := crypto.GenerateSecp256k1Key()
 	signer := crypto.NewDefaultSigner(pk)
@@ -92,15 +132,82 @@ func newTestServer(t *testing.T, o testServerOptions) (*http.Client, *websocket.
 	if o.Post == nil {
 		o.Post = mockpost.New()
 	}
-	if o.Authenticator == nil {
-		o.Authenticator = &mockauth.Auth{}
+	if o.BatchStore == nil {
+		o.BatchStore = mockbatchstore.New(mockbatchstore.WithAcceptAllExistsFunc()) // default is with accept-all Exists() func
 	}
-	s := api.New(o.Tags, o.Storer, o.Resolver, o.Pss, o.Traversal, o.Pinning, o.Feeds, o.Post, o.PostageContract, o.Steward, signer, o.Authenticator, o.Logger, nil, api.Options{
+	if o.Authenticator == nil {
+		o.Authenticator = &mockauth.Auth{
+			EnforceFunc: func(_, _, _ string) (bool, error) {
+				return true, nil
+			},
+		}
+	}
+	var chanStore *chanStorer
+
+	topologyDriver := topologymock.NewTopologyDriver(o.TopologyOpts...)
+	acc := accountingmock.NewAccounting(o.AccountingOpts...)
+	settlement := swapmock.New(o.SwapOpts...)
+	chequebook := chequebookmock.NewChequebook(o.ChequebookOpts...)
+	ln := lightnode.NewContainer(o.Overlay)
+	transaction := transactionmock.New(o.TransactionOpts...)
+
+	storeRecipient := statestore.NewStateStore()
+	recipient := pseudosettle.New(nil, o.Logger, storeRecipient, nil, big.NewInt(10000), big.NewInt(10000), o.P2P)
+
+	erc20 := erc20mock.New(o.Erc20Opts...)
+	backend := backendmock.New(o.BackendOpts...)
+
+	var extraOpts = api.ExtraOptions{
+		TopologyDriver:   topologyDriver,
+		Accounting:       acc,
+		Pseudosettle:     recipient,
+		LightNodes:       ln,
+		Swap:             settlement,
+		Chequebook:       chequebook,
+		Pingpong:         o.Pingpong,
+		BlockTime:        o.BlockTime,
+		Tags:             o.Tags,
+		Storer:           o.Storer,
+		Resolver:         o.Resolver,
+		Pss:              o.Pss,
+		TraversalService: o.Traversal,
+		Pinning:          o.Pinning,
+		FeedFactory:      o.Feeds,
+		Post:             o.Post,
+		PostageContract:  o.PostageContract,
+		Steward:          o.Steward,
+	}
+
+	s := api.New(o.PublicKey, o.PSSPublicKey, o.EthereumAddress, o.Logger, transaction, o.BatchStore, o.GatewayMode, api.FullMode, true, true, o.CORSAllowedOrigins)
+
+	s.SetP2P(o.P2P)
+	s.SetSwarmAddress(&o.Overlay)
+
+	noOpTracer, tracerCloser, _ := tracing.NewTracer(&tracing.Options{
+		Enabled: false,
+	})
+
+	t.Cleanup(func() { _ = tracerCloser.Close() })
+
+	chC := s.Configure(signer, o.Authenticator, noOpTracer, api.Options{
 		CORSAllowedOrigins: o.CORSAllowedOrigins,
 		GatewayMode:        o.GatewayMode,
 		WsPingPeriod:       o.WsPingPeriod,
 		Restricted:         o.Restricted,
-	})
+	}, extraOpts, 1, backend, erc20)
+
+	if o.DebugAPI {
+		s.MountTechnicalDebug()
+		s.MountDebug(false)
+	} else {
+		s.MountAPI()
+	}
+
+	if o.DirectUpload {
+		chanStore = newChanStore(chC)
+		t.Cleanup(chanStore.stop)
+	}
+
 	ts := httptest.NewServer(s)
 	t.Cleanup(ts.Close)
 
@@ -119,6 +226,28 @@ func newTestServer(t *testing.T, o testServerOptions) (*http.Client, *websocket.
 		err  error
 	)
 
+	if !o.DebugAPI {
+		httpClient = &http.Client{
+			Transport: web.RoundTripperFunc(func(r *http.Request) (*http.Response, error) {
+				requestURL := r.URL.String()
+				if r.URL.Scheme != "http" {
+					requestURL = ts.URL + r.URL.String()
+				}
+				u, err := url.Parse(requestURL)
+				if err != nil {
+					return nil, err
+				}
+				r.URL = u
+				transport := ts.Client().Transport
+				// always dial to the server address, regardless of the url host and port
+				transport.(*http.Transport).DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+					return net.Dial(network, ts.Listener.Addr().String())
+				}
+				return transport.RoundTrip(r)
+			}),
+		}
+	}
+
 	if o.WsPath != "" {
 		u := url.URL{Scheme: "ws", Host: ts.Listener.Addr().String(), Path: o.WsPath}
 		conn, _, err = websocket.DefaultDialer.Dial(u.String(), o.WsHeaders)
@@ -133,7 +262,7 @@ func newTestServer(t *testing.T, o testServerOptions) (*http.Client, *websocket.
 		}
 	}
 
-	return httpClient, conn, ts.Listener.Addr().String()
+	return httpClient, conn, ts.Listener.Addr().String(), chanStore
 }
 
 func request(t *testing.T, client *http.Client, method, resource string, body io.Reader, responseCode int) *http.Response {
@@ -219,9 +348,10 @@ func TestParseName(t *testing.T) {
 
 		pk, _ := crypto.GenerateSecp256k1Key()
 		signer := crypto.NewDefaultSigner(pk)
-		mockPostage := mockpost.New()
 
-		s := api.New(nil, nil, tC.res, nil, nil, nil, nil, mockPostage, nil, nil, signer, nil, log, nil, api.Options{}).(*api.Server)
+		s := api.New(pk.PublicKey, pk.PublicKey, common.Address{}, log, nil, nil, false, 1, false, false, []string{"*"})
+		s.Configure(signer, nil, nil, api.Options{}, api.ExtraOptions{Resolver: tC.res}, 1, nil, nil)
+		s.MountAPI()
 
 		t.Run(tC.desc, func(t *testing.T) {
 			got, err := s.ResolveNameOrAddress(tC.name)
@@ -231,7 +361,6 @@ func TestParseName(t *testing.T) {
 			if !got.Equal(tC.wantAdr) {
 				t.Errorf("got %s, want %s", got, tC.wantAdr)
 			}
-
 		})
 	}
 }
@@ -277,11 +406,11 @@ func TestCalculateNumberOfChunksEncrypted(t *testing.T) {
 // provided to the api correct the appropriate error code.
 func TestPostageHeaderError(t *testing.T) {
 	var (
-		mockStorer     = mock.NewStorer()
-		mockStatestore = statestore.NewStateStore()
-		logger         = logging.New(io.Discard, 5)
-		mp             = mockpost.New(mockpost.WithIssuer(postage.NewStampIssuer("", "", batchOk, big.NewInt(3), 11, 10, 1000, true)))
-		client, _, _   = newTestServer(t, testServerOptions{
+		mockStorer      = mock.NewStorer()
+		mockStatestore  = statestore.NewStateStore()
+		logger          = logging.New(io.Discard, 5)
+		mp              = mockpost.New(mockpost.WithIssuer(postage.NewStampIssuer("", "", batchOk, big.NewInt(3), 11, 10, 1000, true)))
+		client, _, _, _ = newTestServer(t, testServerOptions{
 			Storer: mockStorer,
 			Tags:   tags.NewTags(mockStatestore, logger),
 			Logger: logger,
@@ -309,6 +438,7 @@ func TestPostageHeaderError(t *testing.T) {
 			jsonhttptest.Request(t, client, http.MethodPost, "/"+endpoint, expCode,
 				jsonhttptest.WithRequestHeader(api.SwarmPostageBatchIdHeader, hexbatch),
 				jsonhttptest.WithRequestHeader(api.ContentTypeHeader, "application/octet-stream"),
+				jsonhttptest.WithRequestHeader(api.SwarmDeferredUploadHeader, "true"),
 				jsonhttptest.WithRequestBody(bytes.NewReader(content)),
 			)
 		})
@@ -322,4 +452,147 @@ func TestPostageHeaderError(t *testing.T) {
 			)
 		})
 	}
+}
+
+// TestPostageDirectAndDeferred tests that incorrect postage batch ids
+// provided to the api correct the appropriate error code.
+func TestPostageDirectAndDeferred(t *testing.T) {
+	var (
+		mockStorer               = mock.NewStorer()
+		mockStatestore           = statestore.NewStateStore()
+		logger                   = logging.New(io.Discard, 5)
+		mp                       = mockpost.New(mockpost.WithIssuer(postage.NewStampIssuer("", "", batchOk, big.NewInt(3), 11, 10, 1000, true)))
+		client, _, _, chanStorer = newTestServer(t, testServerOptions{
+			Storer:       mockStorer,
+			Tags:         tags.NewTags(mockStatestore, logger),
+			Logger:       logger,
+			Post:         mp,
+			DirectUpload: true,
+		})
+
+		endpoints = []string{
+			"bytes", "hop", "chunks",
+		}
+	)
+	for _, endpoint := range endpoints {
+		t.Run(endpoint+": deferred", func(t *testing.T) {
+			hexbatch := hex.EncodeToString(batchOk)
+			chunk := testingc.GenerateTestRandomChunk()
+			var responseBytes []byte
+			jsonhttptest.Request(t, client, http.MethodPost, "/"+endpoint, http.StatusCreated,
+				jsonhttptest.WithRequestHeader(api.SwarmPostageBatchIdHeader, hexbatch),
+				jsonhttptest.WithRequestHeader(api.ContentTypeHeader, "application/octet-stream"),
+				jsonhttptest.WithRequestHeader(api.SwarmDeferredUploadHeader, "true"),
+				jsonhttptest.WithRequestBody(bytes.NewReader(chunk.Data())),
+				jsonhttptest.WithPutResponseBody(&responseBytes),
+			)
+			var body struct {
+				Reference swarm.Address `json:"reference"`
+			}
+			if err := json.Unmarshal(responseBytes, &body); err != nil {
+				t.Fatal("unmarshal response body:", err)
+			}
+			if found, _ := mockStorer.Has(context.Background(), body.Reference); !found {
+				t.Fatal("chunk not found in the store")
+			}
+			if found, _ := chanStorer.Has(context.Background(), body.Reference); found {
+				t.Fatal("chunk was not expected to be present in direct channel")
+			}
+		})
+		t.Run(endpoint+": direct upload", func(t *testing.T) {
+			hexbatch := hex.EncodeToString(batchOk)
+			chunk := testingc.GenerateTestRandomChunk()
+			var responseBytes []byte
+			jsonhttptest.Request(t, client, http.MethodPost, "/"+endpoint, http.StatusCreated,
+				jsonhttptest.WithRequestHeader(api.SwarmPostageBatchIdHeader, hexbatch),
+				jsonhttptest.WithRequestHeader(api.ContentTypeHeader, "application/octet-stream"),
+				jsonhttptest.WithRequestHeader(api.SwarmDeferredUploadHeader, "false"),
+				jsonhttptest.WithRequestBody(bytes.NewReader(chunk.Data())),
+				jsonhttptest.WithPutResponseBody(&responseBytes),
+			)
+
+			var body struct {
+				Reference swarm.Address `json:"reference"`
+			}
+			if err := json.Unmarshal(responseBytes, &body); err != nil {
+				t.Fatal("unmarshal response body:", err)
+			}
+			if found, _ := chanStorer.Has(context.Background(), body.Reference); !found {
+				t.Fatal("chunk not received through the direct channel")
+			}
+			if found, _ := mockStorer.Has(context.Background(), body.Reference); found {
+				t.Fatal("chunk was not expected to be present in store")
+			}
+		})
+	}
+}
+
+type chanStorer struct {
+	chunks map[string]struct{}
+	quit   chan struct{}
+}
+
+func newChanStore(cc <-chan *pusher.Op) *chanStorer {
+	c := &chanStorer{
+		chunks: make(map[string]struct{}),
+		quit:   make(chan struct{}),
+	}
+	go c.drain(cc)
+	return c
+}
+
+func (c *chanStorer) drain(cc <-chan *pusher.Op) {
+	for {
+		select {
+		case op := <-cc:
+			c.chunks[op.Chunk.Address().ByteString()] = struct{}{}
+			op.Err <- nil
+		case <-c.quit:
+			return
+		}
+	}
+}
+func (c *chanStorer) stop() {
+	close(c.quit)
+}
+
+func (c *chanStorer) Get(ctx context.Context, mode storage.ModeGet, addr swarm.Address) (ch swarm.Chunk, err error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (c *chanStorer) Put(ctx context.Context, mode storage.ModePut, chs ...swarm.Chunk) (exist []bool, err error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (c *chanStorer) GetMulti(ctx context.Context, mode storage.ModeGet, addrs ...swarm.Address) (ch []swarm.Chunk, err error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (c *chanStorer) Has(ctx context.Context, addr swarm.Address) (yes bool, err error) {
+	_, ok := c.chunks[addr.ByteString()]
+	return ok, nil
+}
+
+func (c *chanStorer) HasMulti(ctx context.Context, addrs ...swarm.Address) (yes []bool, err error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (c *chanStorer) Set(ctx context.Context, mode storage.ModeSet, addrs ...swarm.Address) (err error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (c *chanStorer) LastPullSubscriptionBinID(bin uint8) (id uint64, err error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (c *chanStorer) SubscribePull(ctx context.Context, bin uint8, since uint64, until uint64) (<-chan storage.Descriptor, <-chan struct{}, func()) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (c *chanStorer) SubscribePush(ctx context.Context, skipf func([]byte) bool) (<-chan swarm.Chunk, func(), func()) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (c *chanStorer) Close() error {
+	panic("not implemented") // TODO: Implement
 }

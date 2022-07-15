@@ -7,10 +7,9 @@ import (
 	"math/big"
 	"testing"
 
-	hopabi "github.com/redesblock/hop/contracts/abi"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	hopabi "github.com/redesblock/hop/contracts/abi"
 	"github.com/redesblock/hop/core/settlement/swap/chequebook"
 	"github.com/redesblock/hop/core/transaction"
 	"github.com/redesblock/hop/core/transaction/backendmock"
@@ -72,9 +71,9 @@ func TestFactoryVerifySelf(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		factory := chequebook.NewFactory(
 			backendWithCodeAt(map[common.Address]string{
-				factoryAddress: hopabi.SimpleSwapFactoryDeployedBinv0_4_0,
-				legacyFactory1: hopabi.SimpleSwapFactoryDeployedBinv0_3_1,
-				legacyFactory2: hopabi.SimpleSwapFactoryDeployedBinv0_3_1,
+				factoryAddress: hopabi.SimpleSwapFactoryDeployedBin,
+				legacyFactory1: hopabi.SimpleSwapFactoryDeployedBin,
+				legacyFactory2: hopabi.SimpleSwapFactoryDeployedBin,
 			}),
 			transactionmock.New(),
 			factoryAddress,
@@ -109,8 +108,8 @@ func TestFactoryVerifySelf(t *testing.T) {
 	t.Run("invalid legacy factories", func(t *testing.T) {
 		factory := chequebook.NewFactory(
 			backendWithCodeAt(map[common.Address]string{
-				factoryAddress: hopabi.SimpleSwapFactoryDeployedBinv0_4_0,
-				legacyFactory1: hopabi.SimpleSwapFactoryDeployedBinv0_3_1,
+				factoryAddress: hopabi.SimpleSwapFactoryDeployedBin,
+				legacyFactory1: hopabi.SimpleSwapFactoryDeployedBin,
 				legacyFactory2: "abcd",
 			}),
 			transactionmock.New(),

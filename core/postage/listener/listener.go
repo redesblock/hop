@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	hopabi "github.com/redesblock/hop/contracts/abi"
 	"math/big"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,18 +14,23 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/prometheus/client_golang/prometheus"
+	hopabi "github.com/redesblock/hop/contracts/abi"
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/postage/batchservice"
 	"github.com/redesblock/hop/core/transaction"
-
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
-	blockPage   = 5000      // how many blocks to sync every time we page
-	tailSize    = 4         // how many blocks to tail from the tip of the chain
-	batchFactor = uint64(5) // minimal number of blocks to sync at once
+	blockPage          = 5000      // how many blocks to sync every time we page
+	tailSize           = 4         // how many blocks to tail from the tip of the chain
+	defaultBatchFactor = uint64(5) // // minimal number of blocks to sync at once
+)
+
+var (
+	// for testing, set externally
+	batchFactorOverridePublic = "5"
 )
 
 var (
@@ -47,12 +52,6 @@ type BlockHeightContractFilterer interface {
 	BlockNumber(context.Context) (uint64, error)
 }
 
-// Shutdowner interface is passed to the listener to shutdown the node if we hit
-// error while listening for blockchain events.
-type Shutdowner interface {
-	Shutdown(context.Context) error
-}
-
 type listener struct {
 	logger    logging.Logger
 	ev        BlockHeightContractFilterer
@@ -62,28 +61,28 @@ type listener struct {
 	quit                chan struct{}
 	wg                  sync.WaitGroup
 	metrics             metrics
-	shutdowner          Shutdowner
 	stallingTimeout     time.Duration
 	backoffTime         time.Duration
+	syncingStopped      chan struct{}
 }
 
 func New(
+	syncingStopped chan struct{},
 	logger logging.Logger,
 	ev BlockHeightContractFilterer,
 	postageStampAddress common.Address,
 	blockTime uint64,
-	shutdowner Shutdowner,
 	stallingTimeout time.Duration,
 	backoffTime time.Duration,
 ) postage.Listener {
 	return &listener{
+		syncingStopped:      syncingStopped,
 		logger:              logger,
 		ev:                  ev,
 		blockTime:           blockTime,
 		postageStampAddress: postageStampAddress,
 		quit:                make(chan struct{}),
 		metrics:             newMetrics(),
-		shutdowner:          shutdowner,
 		stallingTimeout:     stallingTimeout,
 		backoffTime:         backoffTime,
 	}
@@ -168,14 +167,62 @@ func (l *listener) processEvent(e types.Log, updater postage.EventUpdater) error
 	}
 }
 
-func (l *listener) Listen(from uint64, updater postage.EventUpdater) <-chan struct{} {
+func (l *listener) Listen(from uint64, updater postage.EventUpdater, initState *postage.ChainSnapshot) <-chan error {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		<-l.quit
 		cancel()
 	}()
 
-	synced := make(chan struct{})
+	processEvents := func(events []types.Log, to uint64) error {
+		if err := updater.TransactionStart(); err != nil {
+			return err
+		}
+
+		for _, e := range events {
+			startEv := time.Now()
+			err := updater.UpdateBlockNumber(e.BlockNumber)
+			if err != nil {
+				return err
+			}
+			if err = l.processEvent(e, updater); err != nil {
+				// if we have a zero value batch - silence & log then move on
+				if !errors.Is(err, batchservice.ErrZeroValueBatch) {
+					return err
+				}
+				l.logger.Debugf("listener: failed processing event: %v", err)
+			}
+			totalTimeMetric(l.metrics.EventProcessDuration, startEv)
+		}
+
+		err := updater.UpdateBlockNumber(to)
+		if err != nil {
+			return err
+		}
+
+		if err := updater.TransactionEnd(); err != nil {
+			return err
+		}
+
+		return nil
+	}
+
+	if initState != nil {
+		err := processEvents(initState.Events, initState.LastBlockNumber+1)
+		if err != nil {
+			l.logger.Errorf("failed bootstrapping from initial state %v", err)
+		}
+	}
+
+	batchFactor, err := strconv.ParseUint(batchFactorOverridePublic, 10, 64)
+	if err != nil {
+		l.logger.Warningf("listener: batch factor conversation failed %s: %w", batchFactor, err)
+		batchFactor = defaultBatchFactor
+	}
+
+	l.logger.Debugf("listener: batch factor %d", batchFactor)
+
+	synced := make(chan error)
 	closeOnce := new(sync.Once)
 	paged := make(chan struct{}, 1)
 	paged <- struct{}{}
@@ -245,7 +292,7 @@ func (l *listener) Listen(from uint64, updater postage.EventUpdater) <-chan stru
 				paged <- struct{}{}
 				to = from + blockPage - 1
 			} else {
-				closeOnce.Do(func() { close(synced) })
+				closeOnce.Do(func() { synced <- nil })
 			}
 			l.metrics.BackendCalls.Inc()
 
@@ -257,32 +304,7 @@ func (l *listener) Listen(from uint64, updater postage.EventUpdater) <-chan stru
 				continue
 			}
 
-			if err := updater.TransactionStart(); err != nil {
-				return err
-			}
-
-			for _, e := range events {
-				startEv := time.Now()
-				err = updater.UpdateBlockNumber(e.BlockNumber)
-				if err != nil {
-					return err
-				}
-				if err = l.processEvent(e, updater); err != nil {
-					// if we have a zero value batch - silence & log then move on
-					if !errors.Is(err, batchservice.ErrZeroValueBatch) {
-						return err
-					}
-					l.logger.Debugf("listener: %v", err)
-				}
-				totalTimeMetric(l.metrics.EventProcessDuration, startEv)
-			}
-
-			err = updater.UpdateBlockNumber(to)
-			if err != nil {
-				return err
-			}
-
-			if err := updater.TransactionEnd(); err != nil {
+			if err := processEvents(events, to); err != nil {
 				return err
 			}
 
@@ -302,13 +324,9 @@ func (l *listener) Listen(from uint64, updater postage.EventUpdater) <-chan stru
 				return
 			}
 			l.logger.Errorf("failed syncing event listener, shutting down node err: %v", err)
-			if l.shutdowner != nil {
-				err = l.shutdowner.Shutdown(context.Background())
-				if err != nil {
-					l.logger.Errorf("failed shutting down node: %v", err)
-				}
-			}
 		}
+		closeOnce.Do(func() { synced <- err })
+		close(l.syncingStopped) // trigger shutdown in start.go
 	}()
 
 	return synced

@@ -24,7 +24,7 @@ const (
 	protocolVersion  = "1.0.0"
 	syncStreamName   = "prove"
 	messageTimeout   = 1 * time.Minute
-	limitBurst       = 2
+	limitBurst       = 100
 	limitRate        = time.Minute
 	blocksToRemember = 1000
 )
@@ -105,9 +105,15 @@ func (s *ChainSync) Prove(ctx context.Context, peer swarm.Address, blockheight u
 	return proof.BlockHash, nil
 }
 
-func (s *ChainSync) syncHandler(ctx context.Context, peer p2p.Peer, stream p2p.Stream) error {
+func (s *ChainSync) syncHandler(ctx context.Context, peer p2p.Peer, stream p2p.Stream) (err error) {
+	defer func() {
+		if err != nil {
+			_ = stream.Reset()
+		} else {
+			_ = stream.Close()
+		}
+	}()
 	if !s.inLimiter.Allow(peer.Address.ByteString(), 1) {
-		_ = stream.Reset()
 		return errRateLimitExceeded
 	}
 
@@ -115,8 +121,7 @@ func (s *ChainSync) syncHandler(ctx context.Context, peer p2p.Peer, stream p2p.S
 	ctx, cancel := context.WithTimeout(ctx, messageTimeout)
 	defer cancel()
 	var describe pb.Describe
-	if err := r.ReadMsgWithContext(ctx, &describe); err != nil {
-		_ = stream.Reset()
+	if err = r.ReadMsgWithContext(ctx, &describe); err != nil {
 		return fmt.Errorf("read describe: %w", err)
 	}
 
@@ -128,7 +133,6 @@ func (s *ChainSync) syncHandler(ctx context.Context, peer p2p.Peer, stream p2p.S
 	} else {
 		header, err := s.ethClient.HeaderByNumber(ctx, new(big.Int).SetUint64(height))
 		if err != nil {
-			_ = stream.Reset()
 			return fmt.Errorf("header by number: %w", err)
 		}
 		blockHash = header.Hash().Bytes()
@@ -136,9 +140,9 @@ func (s *ChainSync) syncHandler(ctx context.Context, peer p2p.Peer, stream p2p.S
 	}
 
 	var proof = pb.Proof{BlockHash: blockHash}
-	if err := w.WriteMsgWithContext(ctx, &proof); err != nil {
-		_ = stream.Reset()
+	if err = w.WriteMsgWithContext(ctx, &proof); err != nil {
 		return fmt.Errorf("write proof: %w", err)
 	}
+
 	return nil
 }

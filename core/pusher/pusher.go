@@ -26,6 +26,14 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+type Op struct {
+	Chunk  swarm.Chunk
+	Err    chan error
+	Direct bool
+}
+
+type OpChan <-chan *Op
+
 type Service struct {
 	networkID         uint64
 	storer            storage.Storer
@@ -40,12 +48,13 @@ type Service struct {
 	inflight          *inflight
 	attempts          *attempts
 	sem               chan struct{}
+	smugler           chan OpChan
 }
 
 var (
 	retryInterval    = 5 * time.Second  // time interval between retries
 	traceDuration    = 30 * time.Second // duration for every root tracing span
-	concurrentPushes = 10               // how many chunks to push simultaneously
+	concurrentPushes = 50               // how many chunks to push simultaneously
 	retryCount       = 6
 )
 
@@ -53,6 +62,8 @@ var (
 	ErrInvalidAddress = errors.New("invalid address")
 	ErrShallowReceipt = errors.New("shallow recipt")
 )
+
+const chunkStoreTimeout = 2 * time.Second
 
 func New(networkID uint64, storer storage.Storer, depther topology.NeighborhoodDepther, pushSyncer pushsync.PushSyncer, validStamp postage.ValidStampFn, tagger *tags.Tags, logger logging.Logger, tracer *tracing.Tracer, warmupTime time.Duration) *Service {
 	p := &Service{
@@ -69,6 +80,7 @@ func New(networkID uint64, storer storage.Storer, depther topology.NeighborhoodD
 		inflight:          newInflight(),
 		attempts:          &attempts{attempts: make(map[string]int)},
 		sem:               make(chan struct{}, concurrentPushes),
+		smugler:           make(chan OpChan),
 	}
 	go p.chunksWorker(warmupTime, tracer)
 	return p
@@ -111,6 +123,38 @@ func (s *Service) chunksWorker(warmupTime time.Duration, tracer *tracing.Tracer)
 		return ctx, logger
 	}
 
+	push := func(op *Op) {
+		s.metrics.TotalToPush.Inc()
+		ctx, logger := ctxLogger()
+		startTime := time.Now()
+		wg.Add(1)
+		go func() {
+			defer func() {
+				wg.Done()
+				<-s.sem
+			}()
+			if err := s.pushChunk(ctx, op.Chunk, logger, op.Direct); err != nil {
+				// warning: ugly flow control
+				// if errc is set it means we are in a direct push,
+				// we therefore communicate the error into the channel
+				// otherwise we assume this is a buffered upload and
+				// therefore we repeat().
+				if op.Err != nil {
+					op.Err <- err
+				}
+				repeat()
+				s.metrics.TotalErrors.Inc()
+				s.metrics.ErrorTime.Observe(time.Since(startTime).Seconds())
+				logger.Tracef("pusher: cannot push chunk %s: %v", op.Chunk.Address().String(), err)
+				return
+			}
+			if op.Err != nil {
+				op.Err <- nil
+			}
+			s.metrics.TotalSynced.Inc()
+		}()
+	}
+
 	go func() {
 		for {
 			select {
@@ -126,52 +170,73 @@ func (s *Service) chunksWorker(warmupTime time.Duration, tracer *tracing.Tracer)
 		}
 	}()
 
-	for ch := range chunks {
-		// If the stamp is invalid, the chunk is not synced with the network
-		// since other nodes would reject the chunk, so the chunk is marked as
-		// synced which makes it available to the node but not to the network
-		if err := s.valid(ch); err != nil {
-			logger.Warningf("pusher: stamp with batch ID %x is no longer valid, skipping syncing for chunk %s: %v", ch.Stamp().BatchID(), ch.Address().String(), err)
-			if err = s.storer.Set(ctx, storage.ModeSetSync, ch.Address()); err != nil {
-				s.logger.Errorf("pusher: set sync: %w", err)
+	// fan-in channel
+	cc := make(chan *Op)
+
+	go func() {
+		for ch := range chunks {
+			// If the stamp is invalid, the chunk is not synced with the network
+			// since other nodes would reject the chunk, so the chunk is marked as
+			// synced which makes it available to the node but not to the network
+			if err := s.valid(ch); err != nil {
+				logger.Warningf("pusher: stamp with batch ID %x is no longer valid, skipping syncing for chunk %s: %v", ch.Stamp().BatchID(), ch.Address().String(), err)
+
+				ctx, cancel := context.WithTimeout(ctx, chunkStoreTimeout)
+
+				if err = s.storer.Set(ctx, storage.ModeSetSync, ch.Address()); err != nil {
+					s.logger.Errorf("pusher: set sync: %v", err)
+				}
+				cancel()
 			}
-			continue
+			cc <- &Op{Chunk: ch, Direct: false}
 		}
+	}()
+
+	defer wg.Wait()
+
+	for {
 		select {
-		case s.sem <- struct{}{}:
+		case apiC := <-s.smugler:
+			go func() {
+				for op := range apiC {
+					select {
+					case cc <- op:
+					case <-s.quit:
+						return
+					}
+				}
+			}()
+		case op, ok := <-cc:
+			if !ok {
+				chunks = nil
+				continue
+			}
+
+			select {
+			case s.sem <- struct{}{}:
+			case <-s.quit:
+				return
+			}
+
+			push(op)
 		case <-s.quit:
 			return
 		}
-		s.metrics.TotalToPush.Inc()
-		ctx, logger := ctxLogger()
-		startTime := time.Now()
-		wg.Add(1)
-		go func(ctx context.Context, ch swarm.Chunk) {
-			defer func() {
-				wg.Done()
-				<-s.sem
-			}()
-			if err := s.pushChunk(ctx, ch, logger); err != nil {
-				repeat()
-				s.metrics.TotalErrors.Inc()
-				s.metrics.ErrorTime.Observe(time.Since(startTime).Seconds())
-				logger.Tracef("pusher: cannot push chunk %s: %v", ch.Address().String(), err)
-				return
-			}
-			s.metrics.TotalSynced.Inc()
-		}(ctx, ch)
 	}
-
-	wg.Wait()
 }
 
-func (s *Service) pushChunk(ctx context.Context, ch swarm.Chunk, logger *logrus.Entry) error {
+func (s *Service) pushChunk(ctx context.Context, ch swarm.Chunk, logger *logrus.Entry, directUpload bool) error {
 	defer s.inflight.delete(ch)
 	var wantSelf bool
 	// Later when we process receipt, get the receipt and process it
 	// for now ignoring the receipt and checking only for error
 	receipt, err := s.pushSyncer.PushChunkToClosest(ctx, ch)
 	if err != nil {
+		// when doing a direct upload from a light node this will never happen because the light node
+		// never includes self in kademlia iterator. This is only hit when doing a direct upload from a full node
+		if directUpload && errors.Is(err, topology.ErrWantSelf) {
+			return err
+		}
 		if !errors.Is(err, topology.ErrWantSelf) {
 			return err
 		}
@@ -184,6 +249,9 @@ func (s *Service) pushChunk(ctx context.Context, ch swarm.Chunk, logger *logrus.
 	} else if err = s.checkReceipt(receipt); err != nil {
 		return err
 	}
+
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
 	if err = s.storer.Set(ctx, storage.ModeSetSync, ch.Address()); err != nil {
 		return fmt.Errorf("pusher: set sync: %w", err)
 	}
@@ -213,7 +281,6 @@ func (s *Service) pushChunk(ctx context.Context, ch swarm.Chunk, logger *logrus.
 func (s *Service) checkReceipt(receipt *pushsync.Receipt) error {
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, s.networkID)
-
 	addr := receipt.Address
 	publicKey, err := crypto.Recover(receipt.Signature, append(addr.Bytes(), b...))
 	if err != nil {
@@ -227,12 +294,15 @@ func (s *Service) checkReceipt(receipt *pushsync.Receipt) error {
 
 	po := swarm.Proximity(addr.Bytes(), peer.Bytes())
 	d := s.depther.NeighborhoodDepth()
+
+	// if the receipt po is out of depth AND the receipt has not yet hit the maximum retry limit, reject the receipt.
 	if po < d && s.attempts.try(addr) {
 		s.metrics.ShallowReceiptDepth.WithLabelValues(strconv.Itoa(int(po))).Inc()
 		return fmt.Errorf("pusher: shallow receipt depth %d, want at least %d", po, d)
 	}
 	s.logger.Tracef("pusher: pushed chunk %s to node %s, receipt depth %d", addr, peer, po)
 	s.metrics.ReceiptDepth.WithLabelValues(strconv.Itoa(int(po))).Inc()
+	s.attempts.delete(addr)
 	return nil
 }
 
@@ -248,6 +318,16 @@ func (s *Service) valid(ch swarm.Chunk) error {
 		return fmt.Errorf("pusher: valid stamp: %w", err)
 	}
 	return nil
+}
+
+func (s *Service) AddFeed(c <-chan *Op) {
+	go func() {
+		select {
+		case s.smugler <- c:
+		case <-s.quit:
+			// if we're quitting: don't do anything
+		}
+	}()
 }
 
 func (s *Service) Close() error {

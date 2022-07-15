@@ -15,23 +15,23 @@ import (
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/postage"
 	mockpost "github.com/redesblock/hop/core/postage/mock"
-	"github.com/redesblock/hop/core/soc"
 	testingsoc "github.com/redesblock/hop/core/soc/testing"
 	statestore "github.com/redesblock/hop/core/statestore/mock"
 	"github.com/redesblock/hop/core/storage/mock"
+	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
 )
 
 func TestSOC(t *testing.T) {
 	var (
-		testData       = []byte("foo")
-		socResource    = func(owner, id, sig string) string { return fmt.Sprintf("/soc/%s/%s?sig=%s", owner, id, sig) }
-		mockStatestore = statestore.NewStateStore()
-		logger         = logging.New(io.Discard, 0)
-		tag            = tags.NewTags(mockStatestore, logger)
-		mp             = mockpost.New(mockpost.WithIssuer(postage.NewStampIssuer("", "", batchOk, big.NewInt(3), 11, 10, 1000, true)))
-		mockStorer     = mock.NewStorer()
-		client, _, _   = newTestServer(t, testServerOptions{
+		testData        = []byte("foo")
+		socResource     = func(owner, id, sig string) string { return fmt.Sprintf("/soc/%s/%s?sig=%s", owner, id, sig) }
+		mockStatestore  = statestore.NewStateStore()
+		logger          = logging.New(io.Discard, 0)
+		tag             = tags.NewTags(mockStatestore, logger)
+		mp              = mockpost.New(mockpost.WithIssuer(postage.NewStampIssuer("", "", batchOk, big.NewInt(3), 11, 10, 1000, true)))
+		mockStorer      = mock.NewStorer()
+		client, _, _, _ = newTestServer(t, testServerOptions{
 			Storer: mockStorer,
 			Tags:   tag,
 			Post:   mp,
@@ -77,7 +77,7 @@ func TestSOC(t *testing.T) {
 		s := testingsoc.GenerateMockSOC(t, testData)
 
 		// modify the sign
-		sig := make([]byte, soc.SignatureSize)
+		sig := make([]byte, swarm.SocSignatureSize)
 		copy(sig, s.Signature)
 		sig[12] = 0x98
 		sig[10] = 0x12
@@ -95,6 +95,7 @@ func TestSOC(t *testing.T) {
 		s := testingsoc.GenerateMockSOC(t, testData)
 
 		jsonhttptest.Request(t, client, http.MethodPost, socResource(hex.EncodeToString(s.Owner), hex.EncodeToString(s.ID), hex.EncodeToString(s.Signature)), http.StatusCreated,
+			jsonhttptest.WithRequestHeader(api.SwarmDeferredUploadHeader, "true"),
 			jsonhttptest.WithRequestHeader(api.SwarmPostageBatchIdHeader, batchOkStr),
 			jsonhttptest.WithRequestBody(bytes.NewReader(s.WrappedChunk.Data())),
 			jsonhttptest.WithExpectedJSONResponse(api.SocPostResponse{
@@ -119,6 +120,7 @@ func TestSOC(t *testing.T) {
 		s := testingsoc.GenerateMockSOC(t, testData)
 
 		jsonhttptest.Request(t, client, http.MethodPost, socResource(hex.EncodeToString(s.Owner), hex.EncodeToString(s.ID), hex.EncodeToString(s.Signature)), http.StatusCreated,
+			jsonhttptest.WithRequestHeader(api.SwarmDeferredUploadHeader, "true"),
 			jsonhttptest.WithRequestHeader(api.SwarmPostageBatchIdHeader, batchOkStr),
 			jsonhttptest.WithRequestBody(bytes.NewReader(s.WrappedChunk.Data())),
 			jsonhttptest.WithExpectedJSONResponse(api.SocPostResponse{
@@ -126,6 +128,7 @@ func TestSOC(t *testing.T) {
 			}),
 		)
 		jsonhttptest.Request(t, client, http.MethodPost, socResource(hex.EncodeToString(s.Owner), hex.EncodeToString(s.ID), hex.EncodeToString(s.Signature)), http.StatusConflict,
+			jsonhttptest.WithRequestHeader(api.SwarmDeferredUploadHeader, "true"),
 			jsonhttptest.WithRequestHeader(api.SwarmPostageBatchIdHeader, batchOkStr),
 			jsonhttptest.WithRequestBody(bytes.NewReader(s.WrappedChunk.Data())),
 			jsonhttptest.WithExpectedJSONResponse(
@@ -153,6 +156,7 @@ func TestSOC(t *testing.T) {
 			s := testingsoc.GenerateMockSOC(t, testData)
 			hexbatch := hex.EncodeToString(batchOk)
 			jsonhttptest.Request(t, client, http.MethodPost, socResource(hex.EncodeToString(s.Owner), hex.EncodeToString(s.ID), hex.EncodeToString(s.Signature)), http.StatusCreated,
+				jsonhttptest.WithRequestHeader(api.SwarmDeferredUploadHeader, "true"),
 				jsonhttptest.WithRequestHeader(api.SwarmPostageBatchIdHeader, hexbatch),
 				jsonhttptest.WithRequestBody(bytes.NewReader(s.WrappedChunk.Data())),
 			)

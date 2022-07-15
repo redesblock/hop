@@ -20,7 +20,7 @@ import (
 func TestGatewayMode(t *testing.T) {
 	logger := logging.New(io.Discard, 0)
 	chunk := testingc.GenerateTestRandomChunk()
-	client, _, _ := newTestServer(t, testServerOptions{
+	client, _, _, _ := newTestServer(t, testServerOptions{
 		Storer:      mock.NewStorer(),
 		Tags:        tags.NewTags(statestore.NewStateStore(), logger),
 		Logger:      logger,
@@ -64,6 +64,7 @@ func TestGatewayMode(t *testing.T) {
 
 		// should work without pinning
 		jsonhttptest.Request(t, client, http.MethodPost, "/chunks", http.StatusCreated,
+			jsonhttptest.WithRequestHeader(api.SwarmDeferredUploadHeader, "true"),
 			jsonhttptest.WithRequestHeader(api.SwarmPostageBatchIdHeader, batchOkStr),
 			jsonhttptest.WithRequestBody(bytes.NewReader(chunk.Data())),
 		)
@@ -71,6 +72,7 @@ func TestGatewayMode(t *testing.T) {
 		jsonhttptest.Request(t, client, http.MethodPost, "/chunks/0773a91efd6547c754fc1d95fb1c62c7d1b47f959c2caa685dfec8736da95c1c", http.StatusForbidden, forbiddenResponseOption, headerOption)
 
 		jsonhttptest.Request(t, client, http.MethodPost, "/bytes", http.StatusCreated,
+			jsonhttptest.WithRequestHeader(api.SwarmDeferredUploadHeader, "true"),
 			jsonhttptest.WithRequestHeader(api.SwarmPostageBatchIdHeader, batchOkStr),
 			jsonhttptest.WithRequestBody(bytes.NewReader(chunk.Data())),
 		) // should work without pinning
@@ -88,6 +90,7 @@ func TestGatewayMode(t *testing.T) {
 		})
 
 		jsonhttptest.Request(t, client, http.MethodPost, "/bytes", http.StatusCreated,
+			jsonhttptest.WithRequestHeader(api.SwarmDeferredUploadHeader, "true"),
 			jsonhttptest.WithRequestHeader(api.SwarmPostageBatchIdHeader, batchOkStr),
 			jsonhttptest.WithRequestBody(bytes.NewReader(chunk.Data())),
 		) // should work without pinning

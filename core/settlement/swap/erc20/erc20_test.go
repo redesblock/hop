@@ -2,14 +2,13 @@ package erc20_test
 
 import (
 	"context"
-	hopabi "github.com/redesblock/hop/contracts/abi"
 	"math/big"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	hopabi "github.com/redesblock/hop/contracts/abi"
 	"github.com/redesblock/hop/core/settlement/swap/erc20"
 	"github.com/redesblock/hop/core/transaction"
-	backendmock "github.com/redesblock/hop/core/transaction/backendmock"
 	transactionmock "github.com/redesblock/hop/core/transaction/mock"
 )
 
@@ -23,7 +22,6 @@ func TestBalanceOf(t *testing.T) {
 	expectedBalance := big.NewInt(100)
 
 	erc20 := erc20.New(
-		backendmock.New(),
 		transactionmock.New(
 			transactionmock.WithABICall(
 				&erc20ABI,
@@ -53,7 +51,6 @@ func TestTransfer(t *testing.T) {
 	txHash := common.HexToHash("0xdddd")
 
 	erc20 := erc20.New(
-		backendmock.New(),
 		transactionmock.New(
 			transactionmock.WithABISend(&erc20ABI, txHash, address, big.NewInt(0), "transfer", account, value),
 		),

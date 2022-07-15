@@ -218,7 +218,7 @@ func (c *service) AvailableBalance(ctx context.Context, address common.Address) 
 		return nil, err
 	}
 
-	erc20Service := erc20.New(c.backend, c.transactionService, erc20Address)
+	erc20Service := erc20.New(c.transactionService, erc20Address)
 	balance, err := erc20Service.BalanceOf(ctx, address)
 	if err != nil {
 		return nil, err

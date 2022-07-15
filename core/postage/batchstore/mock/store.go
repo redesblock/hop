@@ -6,24 +6,27 @@ import (
 	"math/big"
 
 	"github.com/redesblock/hop/core/postage"
+	"github.com/redesblock/hop/core/postage/batchstore"
 )
 
 var _ postage.Storer = (*BatchStore)(nil)
 
 // BatchStore is a mock BatchStorer
 type BatchStore struct {
-	rs             *postage.ReserveState
-	cs             *postage.ChainState
-	id             []byte
-	batch          *postage.Batch
-	getErr         error
-	getErrDelayCnt int
-	putErr         error
-	putErrDelayCnt int
-	resetCallCount int
+	rs                *postage.ReserveState
+	cs                *postage.ChainState
+	id                []byte
+	batch             *postage.Batch
+	getErr            error
+	getErrDelayCnt    int
+	updateErr         error
+	updateErrDelayCnt int
+	resetCallCount    int
+
+	existsFn func([]byte) (bool, error)
 }
 
-// Option is a an option passed to New
+// Option is an option passed to New.
 type Option func(*BatchStore)
 
 // New creates a new mock BatchStore
@@ -33,7 +36,6 @@ func New(opts ...Option) *BatchStore {
 	for _, o := range opts {
 		o(bs)
 	}
-
 	return bs
 }
 
@@ -61,18 +63,18 @@ func WithGetErr(err error, delayCnt int) Option {
 	}
 }
 
-// WithPutErr will set the put error returned by the ChainStore mock. The error
-// will be returned on each subsequent call after delayCnt calls to Put have
-// been made.
-func WithPutErr(err error, delayCnt int) Option {
+// WithUpdateErr will set the put error returned by the ChainStore mock.
+// The error will be returned on each subsequent call after delayCnt
+// calls to Update have been made.
+func WithUpdateErr(err error, delayCnt int) Option {
 	return func(bs *BatchStore) {
-		bs.putErr = err
-		bs.putErrDelayCnt = delayCnt
+		bs.updateErr = err
+		bs.updateErrDelayCnt = delayCnt
 	}
 }
 
-// WithBatch will set batch to the one provided by user. This will be returned in
-// the next Get
+// WithBatch will set batch to the one provided by user.
+// This will be returned in the next Get.
 func WithBatch(b *postage.Batch) Option {
 	return func(bs *BatchStore) {
 		bs.batch = b
@@ -80,7 +82,21 @@ func WithBatch(b *postage.Batch) Option {
 	}
 }
 
-// Get mocks the Get method from the BatchStore
+func WithExistsFunc(f func([]byte) (bool, error)) Option {
+	return func(bs *BatchStore) {
+		bs.existsFn = f
+	}
+}
+
+func WithAcceptAllExistsFunc() Option {
+	return func(bs *BatchStore) {
+		bs.existsFn = func(_ []byte) (bool, error) {
+			return true, nil
+		}
+	}
+}
+
+// Get mocks the Get method from the BatchStore.
 func (bs *BatchStore) Get(id []byte) (*postage.Batch, error) {
 	if bs.getErr != nil {
 		if bs.getErrDelayCnt == 0 {
@@ -98,13 +114,35 @@ func (bs *BatchStore) Get(id []byte) (*postage.Batch, error) {
 	return bs.batch, nil
 }
 
-// Put mocks the Put method from the BatchStore
-func (bs *BatchStore) Put(batch *postage.Batch, newValue *big.Int, newDepth uint8) error {
-	if bs.putErr != nil {
-		if bs.putErrDelayCnt == 0 {
-			return bs.putErr
+// Iterate mocks the Iterate method from the BatchStore
+func (bs *BatchStore) Iterate(f func(*postage.Batch) (bool, error)) error {
+	if bs.batch == nil {
+		return nil
+	}
+	_, err := f(bs.batch)
+	return err
+}
+
+// Save mocks the Save method from the BatchStore.
+func (bs *BatchStore) Save(batch *postage.Batch) error {
+	if bs.batch != nil {
+		return errors.New("batch already taken")
+	}
+	bs.batch = batch
+	bs.id = batch.ID
+	return nil
+}
+
+// Update mocks the Update method from the BatchStore.
+func (bs *BatchStore) Update(batch *postage.Batch, newValue *big.Int, newDepth uint8) error {
+	if bs.batch == nil || !bytes.Equal(batch.ID, bs.id) {
+		return batchstore.ErrNotFound
+	}
+	if bs.updateErr != nil {
+		if bs.updateErrDelayCnt == 0 {
+			return bs.updateErr
 		}
-		bs.putErrDelayCnt--
+		bs.updateErrDelayCnt--
 	}
 	bs.batch = batch
 	batch.Depth = newDepth
@@ -120,11 +158,11 @@ func (bs *BatchStore) GetChainState() *postage.ChainState {
 
 // PutChainState mocks the PutChainState method from the BatchStore
 func (bs *BatchStore) PutChainState(cs *postage.ChainState) error {
-	if bs.putErr != nil {
-		if bs.putErrDelayCnt == 0 {
-			return bs.putErr
+	if bs.updateErr != nil {
+		if bs.updateErrDelayCnt == 0 {
+			return bs.updateErr
 		}
-		bs.putErrDelayCnt--
+		bs.updateErrDelayCnt--
 	}
 	bs.cs = cs
 	return nil
@@ -134,9 +172,6 @@ func (bs *BatchStore) GetReserveState() *postage.ReserveState {
 	rs := new(postage.ReserveState)
 	if bs.rs != nil {
 		rs.Radius = bs.rs.Radius
-		rs.Available = bs.rs.Available
-		rs.Outer = bs.rs.Outer
-		rs.Inner = bs.rs.Inner
 	}
 	return rs
 }
@@ -149,6 +184,9 @@ func (bs *BatchStore) SetRadiusSetter(r postage.RadiusSetter) {
 
 // Exists reports whether batch referenced by the give id exists.
 func (bs *BatchStore) Exists(id []byte) (bool, error) {
+	if bs.existsFn != nil {
+		return bs.existsFn(id)
+	}
 	return bytes.Equal(bs.id, id), nil
 }
 

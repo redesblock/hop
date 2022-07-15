@@ -27,8 +27,10 @@ import (
 	"github.com/redesblock/hop/core/tracing"
 )
 
+var errEmptyDir = errors.New("no files in root directory")
+
 // dirUploadHandler uploads a directory supplied as a tar in an HTTP request
-func (s *server) dirUploadHandler(w http.ResponseWriter, r *http.Request, storer storage.Storer) {
+func (s *Service) dirUploadHandler(w http.ResponseWriter, r *http.Request, storer storage.Storer, waitFn func() error) {
 	logger := tracing.NewLoggerWithTraceID(r.Context(), s.logger)
 	if r.Body == http.NoBody {
 		logger.Error("hop upload dir: request has no body")
@@ -38,7 +40,7 @@ func (s *server) dirUploadHandler(w http.ResponseWriter, r *http.Request, storer
 	contentType := r.Header.Get(contentTypeHeader)
 	mediaType, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
-		logger.Errorf("hop upload dir: invalid content-type")
+		logger.Error("hop upload dir: invalid content-type")
 		logger.Debugf("hop upload dir: invalid content-type err: %v", err)
 		jsonhttp.BadRequest(w, errInvalidContentType)
 		return
@@ -82,10 +84,12 @@ func (s *server) dirUploadHandler(w http.ResponseWriter, r *http.Request, storer
 	)
 	if err != nil {
 		logger.Debugf("hop upload dir: store dir err: %v", err)
-		logger.Errorf("hop upload dir: store dir")
+		logger.Error("hop upload dir: store dir")
 		switch {
 		case errors.Is(err, postage.ErrBucketFull):
 			jsonhttp.PaymentRequired(w, "batch is overissued")
+		case errors.Is(err, errEmptyDir):
+			jsonhttp.BadRequest(w, errEmptyDir)
 		default:
 			jsonhttp.InternalServerError(w, errDirectoryStore)
 		}
@@ -108,6 +112,13 @@ func (s *server) dirUploadHandler(w http.ResponseWriter, r *http.Request, storer
 			jsonhttp.InternalServerError(w, nil)
 			return
 		}
+	}
+
+	if err = waitFn(); err != nil {
+		s.logger.Debugf("hop upload: sync chunks: %v", err)
+		s.logger.Error("hop upload: sync chunks")
+		jsonhttp.InternalServerError(w, nil)
+		return
 	}
 
 	w.Header().Set("Access-Control-Expose-Headers", SwarmTagHeader)
@@ -139,7 +150,7 @@ func storeDir(
 	}
 
 	if indexFilename != "" && strings.ContainsRune(indexFilename, '/') {
-		return swarm.ZeroAddress, fmt.Errorf("index document suffix must not include slash character")
+		return swarm.ZeroAddress, errors.New("index document suffix must not include slash character")
 	}
 
 	filesAdded := 0
@@ -185,7 +196,7 @@ func storeDir(
 
 	// check if files were uploaded through the manifest
 	if filesAdded == 0 {
-		return swarm.ZeroAddress, fmt.Errorf("no files in tar")
+		return swarm.ZeroAddress, errEmptyDir
 	}
 
 	// store website information
@@ -294,13 +305,15 @@ func (m *multipartReader) Next() (*FileInfo, error) {
 		return nil, err
 	}
 
-	fileName := part.FileName()
-	if fileName == "" {
-		fileName = part.FormName()
+	filePath := part.FileName()
+	if filePath == "" {
+		filePath = part.FormName()
 	}
-	if fileName == "" {
-		return nil, errors.New("filename missing")
+	if filePath == "" {
+		return nil, errors.New("filepath missing")
 	}
+
+	fileName := filepath.Base(filePath)
 
 	contentType := part.Header.Get(contentTypeHeader)
 	if contentType == "" {
@@ -316,12 +329,8 @@ func (m *multipartReader) Next() (*FileInfo, error) {
 		return nil, errors.New("invalid file size")
 	}
 
-	if filepath.Dir(fileName) != "." {
-		return nil, errors.New("multipart upload supports only single directory")
-	}
-
 	return &FileInfo{
-		Path:        fileName,
+		Path:        filePath,
 		Name:        fileName,
 		ContentType: contentType,
 		Size:        fileSize,

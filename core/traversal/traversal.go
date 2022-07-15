@@ -13,6 +13,7 @@ import (
 	"github.com/redesblock/hop/core/file/loadsave"
 	"github.com/redesblock/hop/core/manifest"
 	"github.com/redesblock/hop/core/manifest/mantaray"
+	"github.com/redesblock/hop/core/soc"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
 )
@@ -50,6 +51,15 @@ func (s *service) Traverse(ctx context.Context, addr swarm.Address, iterFn swarm
 			return fmt.Errorf("traversal: iterate chunk address error for %q: %w", ref, err)
 		}
 		return nil
+	}
+
+	ch, err := s.store.Get(ctx, storage.ModeGetRequest, addr)
+	if err != nil {
+		return fmt.Errorf("traversal: failed to get root chunk %s: %w", addr.String(), err)
+	}
+	if soc.Valid(ch) {
+		// if this is a SOC, the traversal will be just be the single chunk
+		return iterFn(addr)
 	}
 
 	ls := loadsave.NewReadonly(s.store)

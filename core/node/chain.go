@@ -9,17 +9,23 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/prometheus/client_golang/prometheus"
+	hopabi "github.com/redesblock/hop/contracts/abi"
 	"github.com/redesblock/hop/core/config"
 	"github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p/libp2p"
+	"github.com/redesblock/hop/core/postage/postagecontract"
 	"github.com/redesblock/hop/core/sctx"
 	"github.com/redesblock/hop/core/settlement"
 	"github.com/redesblock/hop/core/settlement/swap"
 	"github.com/redesblock/hop/core/settlement/swap/chequebook"
+	"github.com/redesblock/hop/core/settlement/swap/erc20"
 	"github.com/redesblock/hop/core/settlement/swap/priceoracle"
 	"github.com/redesblock/hop/core/settlement/swap/swapprotocol"
 	"github.com/redesblock/hop/core/storage"
@@ -40,25 +46,33 @@ func InitChain(
 	logger logging.Logger,
 	stateStore storage.StateStorer,
 	endpoint string,
+	oChainID int64,
 	signer crypto.Signer,
 	pollingInterval time.Duration,
+	chainEnabled bool,
 ) (transaction.Backend, common.Address, int64, transaction.Monitor, transaction.Service, error) {
-	var backend transaction.Backend
-	rpcClient, err := rpc.DialContext(ctx, endpoint)
-	if err != nil {
-		return nil, common.Address{}, 0, nil, nil, fmt.Errorf("dial eth client: %w", err)
+	var backend transaction.Backend = &noOpChainBackend{
+		chainID: oChainID,
 	}
 
-	var versionString string
-	err = rpcClient.CallContext(ctx, &versionString, "web3_clientVersion")
-	if err != nil {
-		logger.Infof("could not connect to backend at %v. In a swap-enabled network a working blockchain node is required. Check your node or specify another node using --swap-endpoint.", endpoint)
-		return nil, common.Address{}, 0, nil, nil, fmt.Errorf("eth client get version: %w", err)
+	if chainEnabled {
+		// connect to the real one
+		rpcClient, err := rpc.DialContext(ctx, endpoint)
+		if err != nil {
+			return nil, common.Address{}, 0, nil, nil, fmt.Errorf("dial eth client: %w", err)
+		}
+
+		var versionString string
+		err = rpcClient.CallContext(ctx, &versionString, "web3_clientVersion")
+		if err != nil {
+			logger.Infof("could not connect to backend at %v. In a swap-enabled network a working blockchain node (for xdai network in production, goerli in testnet) is required. Check your node or specify another node using --swap-endpoint.", endpoint)
+			return nil, common.Address{}, 0, nil, nil, fmt.Errorf("eth client get version: %w", err)
+		}
+
+		logger.Infof("connected to ethereum backend: %s", versionString)
+
+		backend = wrapped.NewBackend(ethclient.NewClient(rpcClient))
 	}
-
-	logger.Infof("connected to ethereum backend: %s", versionString)
-
-	backend = wrapped.NewBackend(ethclient.NewClient(rpcClient))
 
 	chainID, err := backend.ChainID(ctx)
 	if err != nil {
@@ -144,6 +158,7 @@ func InitChequebookService(
 	chequebookFactory chequebook.Factory,
 	initialDeposit string,
 	deployGasPrice string,
+	erc20Service erc20.Service,
 ) (chequebook.Service, error) {
 	chequeSigner := chequebook.NewChequeSigner(signer, chainID)
 
@@ -171,6 +186,7 @@ func InitChequebookService(
 		chainID,
 		overlayEthAddress,
 		chequeSigner,
+		erc20Service,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("chequebook init: %w", err)
@@ -238,6 +254,11 @@ func InitSwap(
 	swapProtocol := swapprotocol.New(p2ps, logger, overlayEthAddress, priceOracle)
 	swapAddressBook := swap.NewAddressbook(stateStore)
 
+	cashoutAddress := overlayEthAddress
+	if chequebookService != nil {
+		cashoutAddress = chequebookService.Address()
+	}
+
 	swapService := swap.New(
 		swapProtocol,
 		logger,
@@ -248,6 +269,7 @@ func InitSwap(
 		networkID,
 		cashoutService,
 		accounting,
+		cashoutAddress,
 	)
 
 	swapProtocol.SetSwap(swapService)
@@ -315,3 +337,96 @@ func GetTxNextBlock(ctx context.Context, logger logging.Logger, backend transact
 
 	return hashBytes, nil
 }
+
+// noOpChequebookService is a noOp implementation for chequebook.Service interface.
+type noOpChequebookService struct{}
+
+func (m *noOpChequebookService) Deposit(context.Context, *big.Int) (hash common.Hash, err error) {
+	return hash, postagecontract.ErrChainDisabled
+}
+func (m *noOpChequebookService) Withdraw(context.Context, *big.Int) (hash common.Hash, err error) {
+	return hash, postagecontract.ErrChainDisabled
+}
+func (m *noOpChequebookService) WaitForDeposit(context.Context, common.Hash) error {
+	return postagecontract.ErrChainDisabled
+}
+func (m *noOpChequebookService) Balance(context.Context) (*big.Int, error) {
+	return nil, postagecontract.ErrChainDisabled
+}
+func (m *noOpChequebookService) AvailableBalance(context.Context) (*big.Int, error) {
+	return nil, postagecontract.ErrChainDisabled
+}
+func (m *noOpChequebookService) Address() common.Address {
+	return common.Address{}
+}
+func (m *noOpChequebookService) Issue(context.Context, common.Address, *big.Int, chequebook.SendChequeFunc) (*big.Int, error) {
+	return nil, postagecontract.ErrChainDisabled
+}
+func (m *noOpChequebookService) LastCheque(common.Address) (*chequebook.SignedCheque, error) {
+	return nil, postagecontract.ErrChainDisabled
+}
+func (m *noOpChequebookService) LastCheques() (map[common.Address]*chequebook.SignedCheque, error) {
+	return nil, postagecontract.ErrChainDisabled
+}
+
+func (m *noOpChequebookService) Txs() ([]string, error) {
+	return nil, nil
+}
+
+// noOpChainBackend is a noOp implementation for transaction.Backend interface.
+type noOpChainBackend struct {
+	chainID int64
+}
+
+func (m noOpChainBackend) Metrics() []prometheus.Collector {
+	return nil
+}
+
+func (m noOpChainBackend) CodeAt(context.Context, common.Address, *big.Int) ([]byte, error) {
+	return common.FromHex(hopabi.SimpleSwapFactoryDeployedBin), nil
+}
+func (m noOpChainBackend) CallContract(context.Context, ethereum.CallMsg, *big.Int) ([]byte, error) {
+	return nil, errors.New("disabled chain backend")
+}
+func (m noOpChainBackend) HeaderByNumber(context.Context, *big.Int) (*types.Header, error) {
+	h := new(types.Header)
+	h.Time = uint64(time.Now().Unix())
+	return h, nil
+}
+func (m noOpChainBackend) PendingNonceAt(context.Context, common.Address) (uint64, error) {
+	panic("chain no op: PendingNonceAt")
+}
+func (m noOpChainBackend) SuggestGasPrice(context.Context) (*big.Int, error) {
+	panic("chain no op: SuggestGasPrice")
+}
+func (m noOpChainBackend) EstimateGas(context.Context, ethereum.CallMsg) (uint64, error) {
+	panic("chain no op: EstimateGas")
+}
+func (m noOpChainBackend) SendTransaction(context.Context, *types.Transaction) error {
+	panic("chain no op: SendTransaction")
+}
+func (m noOpChainBackend) TransactionReceipt(context.Context, common.Hash) (*types.Receipt, error) {
+	r := new(types.Receipt)
+	r.BlockNumber = big.NewInt(1)
+	return r, nil
+}
+func (m noOpChainBackend) TransactionByHash(context.Context, common.Hash) (tx *types.Transaction, isPending bool, err error) {
+	panic("chain no op: TransactionByHash")
+}
+func (m noOpChainBackend) BlockNumber(context.Context) (uint64, error) {
+	return 4, nil
+}
+func (m noOpChainBackend) BalanceAt(context.Context, common.Address, *big.Int) (*big.Int, error) {
+	panic("chain no op: BalanceAt")
+}
+func (m noOpChainBackend) NonceAt(context.Context, common.Address, *big.Int) (uint64, error) {
+	panic("chain no op: NonceAt")
+}
+func (m noOpChainBackend) FilterLogs(context.Context, ethereum.FilterQuery) ([]types.Log, error) {
+	panic("chain no op: FilterLogs")
+}
+func (m noOpChainBackend) ChainID(context.Context) (*big.Int, error) {
+	return big.NewInt(m.chainID), nil
+}
+
+func (m noOpChainBackend) Close() {}

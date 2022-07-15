@@ -9,6 +9,7 @@ import (
 
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/resolver"
+	"github.com/redesblock/hop/core/resolver/cidv1"
 	"github.com/redesblock/hop/core/resolver/client/ens"
 	"github.com/redesblock/hop/core/resolver/multiresolver/multierror"
 )
@@ -96,6 +97,12 @@ func WithLogger(logger logging.Logger) Option {
 func WithForceDefault() Option {
 	return func(mr *MultiResolver) {
 		mr.ForceDefault = true
+	}
+}
+
+func WithDefaultCIDResolver() Option {
+	return func(mr *MultiResolver) {
+		mr.PushResolver("", cidv1.Resolver{})
 	}
 }
 

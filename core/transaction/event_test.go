@@ -5,10 +5,9 @@ import (
 	"math/big"
 	"testing"
 
-	hopabi "github.com/redesblock/hop/contracts/abi"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	hopabi "github.com/redesblock/hop/contracts/abi"
 	"github.com/redesblock/hop/core/transaction"
 )
 
