@@ -20,7 +20,7 @@ func TestFallingEdge(t *testing.T) {
 			close(ok)
 			return
 		case <-time.After(100 * time.Millisecond):
-			t.Error("timed out")
+			t.Errorf("timed out")
 		}
 	}()
 
@@ -55,7 +55,7 @@ func TestFallingEdgeBuffer(t *testing.T) {
 			close(ok)
 			return
 		case <-time.After(1000 * time.Millisecond):
-			t.Error("timed out")
+			t.Errorf("timed out")
 		}
 	}()
 
@@ -95,7 +95,7 @@ func TestFallingEdgeWorstCase(t *testing.T) {
 			close(ok)
 			return
 		case <-time.After(1000 * time.Millisecond):
-			t.Error("timed out")
+			t.Errorf("timed out")
 		}
 	}()
 	go func() {

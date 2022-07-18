@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync/atomic"
 	"testing"
@@ -223,7 +224,7 @@ type retrievalMock struct {
 
 func (r *retrievalMock) RetrieveChunk(ctx context.Context, addr swarm.Address, orig bool) (chunk swarm.Chunk, err error) {
 	if r.failure {
-		return nil, errors.New("chunk not found")
+		return nil, fmt.Errorf("chunk not found")
 	}
 	r.called = true
 	atomic.AddInt32(&r.callCount, 1)

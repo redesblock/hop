@@ -34,10 +34,6 @@ var (
 	ErrGasPriceTooLow      = errors.New("gas price too low")
 )
 
-// minGasPrice determines the minimum gas price
-// threshold (in wei) for the creation of a transaction.
-var minGasPrice = big.NewInt(1000)
-
 // TxRequest describes a request for a transaction that can be executed.
 type TxRequest struct {
 	To          *common.Address // recipient of the transaction
@@ -261,15 +257,14 @@ func (t *transactionService) prepareTransaction(ctx context.Context, request *Tx
 		gasLimit = request.GasLimit
 	}
 
-	gasPrice := request.GasPrice
-	if gasPrice == nil {
+	var gasPrice *big.Int
+	if request.GasPrice == nil {
 		gasPrice, err = t.backend.SuggestGasPrice(ctx)
 		if err != nil {
 			return nil, err
 		}
-	}
-	if gasPrice.Cmp(minGasPrice) < 0 {
-		return nil, ErrGasPriceTooLow
+	} else {
+		gasPrice = request.GasPrice
 	}
 
 	return types.NewTx(&types.LegacyTx{
@@ -413,7 +408,7 @@ func (t *transactionService) CancelTransaction(ctx context.Context, originalTxHa
 		return common.Hash{}, ErrGasPriceTooLow
 	}
 
-	signedTx, err := t.signer.SignTx(types.NewTx(&types.LegacyTx{
+	signedTx, err := t.signer.SignTx(types.NewTx(&types.AccessListTx{
 		Nonce:    storedTransaction.Nonce,
 		To:       &t.sender,
 		Value:    big.NewInt(0),

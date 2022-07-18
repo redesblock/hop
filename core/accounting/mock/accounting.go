@@ -3,7 +3,6 @@
 package mock
 
 import (
-	"context"
 	"math/big"
 	"sync"
 
@@ -109,7 +108,7 @@ func (s *Service) MakeCreditAction(peer swarm.Address, price uint64) accounting.
 }
 
 // Debit is the mock function wrapper that calls the set implementation
-func (s *Service) PrepareDebit(_ context.Context, peer swarm.Address, price uint64) (accounting.Action, error) {
+func (s *Service) PrepareDebit(peer swarm.Address, price uint64) (accounting.Action, error) {
 	if s.prepareDebitFunc != nil {
 		return s.prepareDebitFunc(peer, price)
 	}
@@ -123,7 +122,7 @@ func (s *Service) PrepareDebit(_ context.Context, peer swarm.Address, price uint
 	}, nil
 }
 
-func (s *Service) PrepareCredit(_ context.Context, peer swarm.Address, price uint64, originated bool) (accounting.Action, error) {
+func (s *Service) PrepareCredit(peer swarm.Address, price uint64, originated bool) (accounting.Action, error) {
 	if s.prepareCreditFunc != nil {
 		return s.prepareCreditFunc(peer, price, originated)
 	}

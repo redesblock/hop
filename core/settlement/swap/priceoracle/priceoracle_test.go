@@ -2,12 +2,12 @@ package priceoracle_test
 
 import (
 	"context"
+	hopabi "github.com/redesblock/hop/contracts/abi"
 	"io"
 	"math/big"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
-	hopabi "github.com/redesblock/hop/contracts/abi"
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/settlement/swap/priceoracle"
 	"github.com/redesblock/hop/core/transaction"

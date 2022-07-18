@@ -1,24 +1,18 @@
 package api
 
 import (
-	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/redesblock/hop/core/cac"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/sctx"
-	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
 	"github.com/redesblock/hop/core/tracing"
-	"github.com/redesblock/hop/core/util/ioutil"
 )
 
 type bytesPostResponse struct {
@@ -26,19 +20,13 @@ type bytesPostResponse struct {
 }
 
 // bytesUploadHandler handles upload of raw binary data of arbitrary length.
-func (s *Service) bytesUploadHandler(w http.ResponseWriter, r *http.Request) {
+func (s *server) bytesUploadHandler(w http.ResponseWriter, r *http.Request) {
 	logger := tracing.NewLoggerWithTraceID(r.Context(), s.logger)
 
 	putter, wait, err := s.newStamperPutter(r)
 	if err != nil {
 		logger.Debugf("bytes upload: get putter:%v", err)
 		logger.Error("bytes upload: putter")
-		jsonhttp.BadRequest(w, nil)
-		return
-	}
-
-	if strings.Contains(strings.ToLower(r.Header.Get(contentTypeHeader)), "multipart/form-data") {
-		logger.Error("bytes upload: multipart uploads are not supported on this endpoint")
 		jsonhttp.BadRequest(w, nil)
 		return
 	}
@@ -67,14 +55,7 @@ func (s *Service) bytesUploadHandler(w http.ResponseWriter, r *http.Request) {
 	// Add the tag to the context
 	ctx := sctx.SetTag(r.Context(), tag)
 	p := requestPipelineFn(putter, r)
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	pr := ioutil.TimeoutReader(ctx, r.Body, time.Minute, func(n uint64) {
-		logger.Error("bytes upload: idle read timeout exceeded")
-		logger.Debugf("bytes upload: idle read timeout exceeded: read %d", n)
-		cancel()
-	})
-	address, err := p(ctx, pr)
+	address, err := p(ctx, r.Body)
 	if err != nil {
 		logger.Debugf("bytes upload: split write all: %v", err)
 		logger.Error("bytes upload: split write all")
@@ -120,7 +101,7 @@ func (s *Service) bytesUploadHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // bytesGetHandler handles retrieval of raw binary data of arbitrary length.
-func (s *Service) bytesGetHandler(w http.ResponseWriter, r *http.Request) {
+func (s *server) bytesGetHandler(w http.ResponseWriter, r *http.Request) {
 	logger := tracing.NewLoggerWithTraceID(r.Context(), s.logger).Logger
 	nameOrHex := mux.Vars(r)["address"]
 
@@ -137,36 +118,4 @@ func (s *Service) bytesGetHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.downloadHandler(w, r, address, additionalHeaders, true)
-}
-
-func (s *Service) bytesHeadHandler(w http.ResponseWriter, r *http.Request) {
-	logger := tracing.NewLoggerWithTraceID(r.Context(), s.logger).Logger
-	nameOrHex := mux.Vars(r)["address"]
-
-	address, err := s.resolveNameOrAddress(nameOrHex)
-	if err != nil {
-		logger.Debugf("bytes: parse address %s: %v", nameOrHex, err)
-		logger.Error("bytes: parse address error")
-		w.WriteHeader(http.StatusBadRequest) // HEAD requests do not write a body
-		return
-	}
-	ch, err := s.storer.Get(r.Context(), storage.ModeGetRequest, address)
-	if err != nil {
-		logger.Debugf("bytes: get root chunk %s: %v", nameOrHex, err)
-		logger.Error("bytes: get rook chunk error")
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-	w.Header().Add("Access-Control-Expose-Headers", "Accept-Ranges, Content-Encoding")
-	w.Header().Add("Content-Type", "application/octet-stream")
-	var span int64
-
-	if cac.Valid(ch) {
-		span = int64(binary.LittleEndian.Uint64(ch.Data()[:swarm.SpanSize]))
-	} else {
-		// soc
-		span = int64(len(ch.Data()))
-	}
-	w.Header().Add("Content-Length", fmt.Sprintf("%d", span))
-	w.WriteHeader(http.StatusOK) // HEAD requests do not write a body
 }

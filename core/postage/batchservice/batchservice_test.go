@@ -27,7 +27,7 @@ var (
 type mockListener struct {
 }
 
-func (*mockListener) Listen(from uint64, updater postage.EventUpdater, _ *postage.ChainSnapshot) <-chan error {
+func (*mockListener) Listen(from uint64, updater postage.EventUpdater, _ *postage.ChainSnapshot) <-chan struct{} {
 	return nil
 }
 func (*mockListener) Close() error { return nil }

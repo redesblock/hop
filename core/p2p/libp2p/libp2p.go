@@ -16,6 +16,7 @@ import (
 
 	"github.com/hashicorp/go-multierror"
 	"github.com/libp2p/go-libp2p"
+	autonat "github.com/libp2p/go-libp2p-autonat"
 	crypto "github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/event"
 	"github.com/libp2p/go-libp2p-core/host"
@@ -25,7 +26,7 @@ import (
 	protocol "github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/libp2p/go-libp2p-peerstore/pstoremem"
 	lp2pswarm "github.com/libp2p/go-libp2p-swarm"
-	autonat "github.com/libp2p/go-libp2p/p2p/host/autonat"
+	goyamux "github.com/libp2p/go-libp2p-yamux"
 	basichost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	libp2pping "github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	"github.com/libp2p/go-tcp-transport"
@@ -62,6 +63,11 @@ const (
 	defaultLightNodeLimit = 100
 	peerUserAgentTimeout  = time.Second
 )
+
+func init() {
+	goyamux.DefaultTransport.AcceptBacklog = 1024
+	goyamux.DefaultTransport.MaxIncomingStreams = 5000
+}
 
 type Service struct {
 	ctx               context.Context
@@ -469,8 +475,8 @@ func (s *Service) handleIncoming(stream network.Stream) {
 
 	peerUserAgent := appendSpace(s.peerUserAgent(s.ctx, peerID))
 
-	s.logger.Tracef("stream handler: successfully connected to peer %s%s%s (inbound)", i.HopAddress.ShortString(), i.LightString(), peerUserAgent)
-	s.logger.Debugf("stream handler: successfully connected to peer %s%s%s (inbound)", i.HopAddress.Overlay, i.LightString(), peerUserAgent)
+	s.logger.Debugf("stream handler: successfully connected to peer %s%s%s (inbound)", i.HopAddress.ShortString(), i.LightString(), peerUserAgent)
+	s.logger.Infof("stream handler: successfully connected to peer %s%s%s (inbound)", i.HopAddress.Overlay, i.LightString(), peerUserAgent)
 }
 
 func (s *Service) SetPickyNotifier(n p2p.PickyNotifier) {
@@ -549,15 +555,10 @@ func (s *Service) AddProtocol(p p2p.ProtocolSpec) (err error) {
 					}
 					logger.Tracef("handler(%s): blocklisted %s", p.Name, overlay.String())
 				}
-
+				// count unexpected requests
 				if errors.Is(err, p2p.ErrUnexpected) {
 					s.metrics.UnexpectedProtocolReqCount.Inc()
 				}
-
-				if errors.Is(err, network.ErrReset) {
-					s.metrics.StreamHandlerErrResetCount.Inc()
-				}
-
 				logger.Debugf("could not handle protocol %s/%s: stream %s: peer %s: error: %v", p.Name, p.Version, ss.Name, overlay, err)
 				return
 			}
@@ -743,8 +744,8 @@ func (s *Service) Connect(ctx context.Context, addr ma.Multiaddr) (address *hop.
 
 	peerUserAgent := appendSpace(s.peerUserAgent(ctx, info.ID))
 
-	s.logger.Tracef("successfully connected to peer %s%s%s (outbound)", i.HopAddress.ShortString(), i.LightString(), peerUserAgent)
-	s.logger.Debugf("successfully connected to peer %s%s%s (outbound)", overlay, i.LightString(), peerUserAgent)
+	s.logger.Debugf("successfully connected to peer %s%s%s (outbound)", i.HopAddress.ShortString(), i.LightString(), peerUserAgent)
+	s.logger.Infof("successfully connected to peer %s%s%s (outbound)", overlay, i.LightString(), peerUserAgent)
 	return i.HopAddress, nil
 }
 
@@ -823,10 +824,6 @@ func (s *Service) disconnected(address swarm.Address) {
 
 func (s *Service) Peers() []p2p.Peer {
 	return s.peers.peers()
-}
-
-func (s *Service) Blocklisted(overlay swarm.Address) (bool, error) {
-	return s.blocklist.Exists(overlay)
 }
 
 func (s *Service) BlocklistedPeers() ([]p2p.Peer, error) {

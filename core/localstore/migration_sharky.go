@@ -13,7 +13,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
-// DBSchemaSharky is the bee schema identifier for sharky.
+// DBSchemaSharky is the hop schema identifier for sharky.
 const DBSchemaSharky = "sharky"
 
 // migrateSharky writes the new retrievalDataIndex format by storing chunk data in sharky

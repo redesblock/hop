@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   version: 2.0.1
   title: Debug API
-  description: "A list of the currently provided debug interfaces to interact with the bee node"
+  description: "A list of the currently provided debug interfaces to interact with the hop node"
 
 security:
   - {}
@@ -14,10 +14,10 @@ servers:
     variables:
       apiRoot:
         default: "localhost"
-        description: Base address of the local bee node debug API
+        description: Base address of the local hop node debug API
       port:
         default: "1635"
-        description: Service port provided in bee node config
+        description: Service port provided in hop node config
 
 paths:
   "/addresses":
@@ -489,7 +489,7 @@ paths:
         - Connectivity
       responses:
         "200":
-          description: Swarm topology of the bee node
+          description: Swarm topology of the hop node
           content:
             application/json:
               schema:

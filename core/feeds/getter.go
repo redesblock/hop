@@ -3,7 +3,6 @@ package feeds
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"time"
 
@@ -54,7 +53,7 @@ func FromChunk(ch swarm.Chunk) (uint64, []byte, error) {
 	}
 	cac := s.WrappedChunk()
 	if len(cac.Data()) < 16 {
-		return 0, nil, errors.New("feed update payload too short")
+		return 0, nil, fmt.Errorf("feed update payload too short")
 	}
 	payload := cac.Data()[16:]
 	at := binary.BigEndian.Uint64(cac.Data()[8:16])

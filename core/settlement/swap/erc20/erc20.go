@@ -34,36 +34,6 @@ func New(transactionService transaction.Service, address common.Address) Service
 	}
 }
 
-func (c *erc20Service) TotalSupply(ctx context.Context) (*big.Int, error) {
-	callData, err := erc20ABI.Pack("totalSupply")
-	if err != nil {
-		return nil, err
-	}
-
-	output, err := c.transactionService.Call(ctx, &transaction.TxRequest{
-		To:   &c.address,
-		Data: callData,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	results, err := erc20ABI.Unpack("totalSupply", output)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(results) != 1 {
-		return nil, errDecodeABI
-	}
-
-	balance, ok := abi.ConvertType(results[0], new(big.Int)).(*big.Int)
-	if !ok || balance == nil {
-		return nil, errDecodeABI
-	}
-	return balance, nil
-}
-
 func (c *erc20Service) BalanceOf(ctx context.Context, address common.Address) (*big.Int, error) {
 	callData, err := erc20ABI.Pack("balanceOf", address)
 	if err != nil {
@@ -107,59 +77,6 @@ func (c *erc20Service) Transfer(ctx context.Context, address common.Address, val
 		GasLimit:    90000,
 		Value:       big.NewInt(0),
 		Description: "token transfer",
-	}
-
-	txHash, err := c.transactionService.Send(ctx, request)
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	return txHash, nil
-}
-
-func (c *erc20Service) Allowance(ctx context.Context, owner common.Address, spender common.Address) (*big.Int, error) {
-	callData, err := erc20ABI.Pack("allowance", owner, spender)
-	if err != nil {
-		return nil, err
-	}
-
-	output, err := c.transactionService.Call(ctx, &transaction.TxRequest{
-		To:   &c.address,
-		Data: callData,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	results, err := erc20ABI.Unpack("allowance", output)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(results) != 1 {
-		return nil, errDecodeABI
-	}
-
-	balance, ok := abi.ConvertType(results[0], new(big.Int)).(*big.Int)
-	if !ok || balance == nil {
-		return nil, errDecodeABI
-	}
-	return balance, nil
-}
-
-func (c *erc20Service) Approval(ctx context.Context, spender common.Address, value *big.Int) (common.Hash, error) {
-	callData, err := erc20ABI.Pack("approve", spender, value)
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	request := &transaction.TxRequest{
-		To:          &c.address,
-		Data:        callData,
-		GasPrice:    sctx.GetGasPrice(ctx),
-		GasLimit:    90000,
-		Value:       big.NewInt(0),
-		Description: "token spender",
 	}
 
 	txHash, err := c.transactionService.Send(ctx, request)

@@ -200,27 +200,6 @@ func (c *postageContract) getBalance(ctx context.Context) (*big.Int, error) {
 	return abi.ConvertType(results[0], new(big.Int)).(*big.Int), nil
 }
 
-func (c *postageContract) AvailableBalance(ctx context.Context, address common.Address) (*big.Int, error) {
-	callData, err := erc20ABI.Pack("balanceOf", address)
-	if err != nil {
-		return nil, err
-	}
-
-	result, err := c.transactionService.Call(ctx, &transaction.TxRequest{
-		To:   &c.hopTokenAddress,
-		Data: callData,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	results, err := erc20ABI.Unpack("balanceOf", result)
-	if err != nil {
-		return nil, err
-	}
-	return abi.ConvertType(results[0], new(big.Int)).(*big.Int), nil
-}
-
 func (c *postageContract) CreateBatch(ctx context.Context, initialBalance *big.Int, depth uint8, immutable bool, label string) ([]byte, error) {
 
 	if depth <= BucketDepth {

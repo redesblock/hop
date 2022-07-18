@@ -69,7 +69,6 @@ type entry struct {
 
 // read models the input to read operation (the output is an error)
 type read struct {
-	ctx  context.Context
 	buf  []byte // variable size read buffer
 	slot uint32 // slot to read from
 }
@@ -101,26 +100,26 @@ func (sh *shard) process() {
 		}
 	}()
 	free := sh.slots.out
-
+LOOP:
 	for {
 		select {
 		case op := <-sh.reads:
-			select {
-			case sh.errc <- sh.read(op):
-			case <-op.ctx.Done():
-				// since the goroutine in the Read method can quit
-				// on shutdown, we need to make sure that we can actually
-				// write to the channel, since a shutdown is possible in
-				// theory between after the point that the context is cancelled
+			// prioritise read ops i.e., continue processing read ops (only) as long as any
+			// this will block any writes on this shard effectively making store-wide
+			// write op to use a differenct shard while this one is busy
+			for {
 				select {
-				case sh.errc <- op.ctx.Err():
+				case sh.errc <- sh.read(op):
 				case <-sh.quit:
-					// since the Read method respects the quit channel
-					// we can safely quit here without writing to the channel
 					return
 				}
-			case <-sh.quit:
-				return
+				select {
+				case op = <-sh.reads:
+				case <-sh.quit:
+					return
+				default:
+					continue LOOP
+				}
 			}
 
 			// only enabled if there is a free slot previously popped

@@ -50,7 +50,7 @@ func TestBitvectorGetSet(t *testing.T) {
 		func() {
 			defer func() {
 				if err := recover(); err == nil {
-					t.Error("expecting panic")
+					t.Errorf("expecting panic")
 				}
 			}()
 			bv.Get(length + 8)

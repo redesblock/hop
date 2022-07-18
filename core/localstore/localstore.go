@@ -668,7 +668,7 @@ func (db *DB) Close() error {
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		db.logger.Error("localstore closed with still active goroutines")
+		db.logger.Errorf("localstore closed with still active goroutines")
 		// Print a full goroutine dump to debug blocking.
 		// TODO: use a logger to write a goroutine profile
 		prof := pprof.Lookup("goroutine")
@@ -702,7 +702,6 @@ func (db *DB) DebugIndices() (indexInfo map[string]int, err error) {
 		"pinIndex":             db.pinIndex,
 		"postageChunksIndex":   db.postageChunksIndex,
 		"postageRadiusIndex":   db.postageRadiusIndex,
-		"postageIndexIndex":    db.postageIndexIndex,
 	} {
 		indexSize, err := v.Count()
 		if err != nil {

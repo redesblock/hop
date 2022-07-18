@@ -68,11 +68,11 @@ func TestOneMigration(t *testing.T) {
 	}
 
 	if !ran {
-		t.Error("expected migration did not run")
+		t.Errorf("expected migration did not run")
 	}
 
 	if shouldNotRun {
-		t.Error("migration ran but shouldnt have")
+		t.Errorf("migration ran but shouldnt have")
 	}
 
 	err = db.Close()
@@ -151,7 +151,7 @@ func TestManyMigrations(t *testing.T) {
 	}
 
 	if shouldNotRun {
-		t.Error("migration ran but shouldnt have")
+		t.Errorf("migration ran but shouldnt have")
 	}
 
 	for i, v := range executionOrder {
@@ -218,7 +218,7 @@ func TestMigrationErrorFrom(t *testing.T) {
 	}
 
 	if shouldNotRun {
-		t.Error("migration ran but shouldnt have")
+		t.Errorf("migration ran but shouldnt have")
 	}
 }
 
@@ -275,6 +275,6 @@ func TestMigrationErrorTo(t *testing.T) {
 	}
 
 	if shouldNotRun {
-		t.Error("migration ran but shouldnt have")
+		t.Errorf("migration ran but shouldnt have")
 	}
 }

@@ -11,19 +11,16 @@ import (
 	"github.com/redesblock/hop/core/cac"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/postage"
-	"github.com/redesblock/hop/core/sctx"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
 )
 
-const streamReadTimeout = 15 * time.Minute
-
 var successWsMsg = []byte{}
 
-func (s *Service) chunkUploadStreamHandler(w http.ResponseWriter, r *http.Request) {
+func (s *server) chunkUploadStreamHandler(w http.ResponseWriter, r *http.Request) {
 
-	_, tag, putter, wait, err := s.processUploadRequest(r)
+	ctx, tag, putter, wait, err := s.processUploadRequest(r)
 	if err != nil {
 		jsonhttp.BadRequest(w, err.Error())
 		return
@@ -43,14 +40,9 @@ func (s *Service) chunkUploadStreamHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	cctx := context.Background()
-	if tag != nil {
-		cctx = sctx.SetTag(cctx, tag)
-	}
-
 	s.wsWg.Add(1)
 	go s.handleUploadStream(
-		cctx,
+		ctx,
 		c,
 		tag,
 		putter,
@@ -60,7 +52,7 @@ func (s *Service) chunkUploadStreamHandler(w http.ResponseWriter, r *http.Reques
 	)
 }
 
-func (s *Service) handleUploadStream(
+func (s *server) handleUploadStream(
 	ctx context.Context,
 	conn *websocket.Conn,
 	tag *tags.Tag,
@@ -107,7 +99,7 @@ func (s *Service) handleUploadStream(
 			time.Now().Add(writeDeadline),
 		)
 		if err != nil {
-			s.logger.Error("chunk stream handler: failed sending close msg")
+			s.logger.Errorf("chunk stream handler: failed sending close msg")
 		}
 	}
 
@@ -124,7 +116,7 @@ func (s *Service) handleUploadStream(
 			// if there is no indication to stop, go ahead and read the next message
 		}
 
-		err = conn.SetReadDeadline(time.Now().Add(streamReadTimeout))
+		err = conn.SetReadDeadline(time.Now().Add(readDeadline))
 		if err != nil {
 			s.logger.Debugf("chunk stream handler: set read deadline: %v", err)
 			s.logger.Error("chunk stream handler: set read deadline")

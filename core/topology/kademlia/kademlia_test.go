@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"math/rand"
 	"reflect"
 	"sync"
@@ -435,7 +434,7 @@ func TestEachNeighbor(t *testing.T) {
 func TestManage(t *testing.T) {
 	var (
 		conns                    int32 // how many connect calls were made to the p2p mock
-		saturation               = *kademlia.SaturationPeers
+		saturation               = *kademlia.QuickSaturationPeers
 		base, kad, ab, _, signer = newTestKademlia(t, &conns, nil, kademlia.Options{
 			BitSuffixLength:  -1,
 			ReachabilityFunc: func(_ swarm.Address) bool { return false },
@@ -455,7 +454,7 @@ func TestManage(t *testing.T) {
 		addOne(t, signer, kad, ab, addr)
 	}
 
-	waitCounter(t, &conns, int32(saturation))
+	waitCounter(t, &conns, 4)
 
 	// next, we add peers to the next bin
 	for i := 0; i < saturation; i++ {
@@ -463,7 +462,7 @@ func TestManage(t *testing.T) {
 		addOne(t, signer, kad, ab, addr)
 	}
 
-	waitCounter(t, &conns, int32(saturation))
+	waitCounter(t, &conns, 4)
 
 	// here, we attempt to add to bin 0, but bin is saturated, so no new peers should connect to it
 	for i := 0; i < saturation; i++ {
@@ -485,8 +484,8 @@ func TestManageWithBalancing(t *testing.T) {
 	var (
 		conns int32 // how many connect calls were made to the p2p mock
 
-		saturationFuncImpl *func(bin uint8, peers, connected *pslice.PSlice, _ kademlia.PeerFilterFunc) bool
-		saturationFunc     = func(bin uint8, peers, connected *pslice.PSlice, filter kademlia.PeerFilterFunc) bool {
+		saturationFuncImpl *func(bin uint8, peers, connected *pslice.PSlice, _ kademlia.PeerFilterFunc) (bool, bool)
+		saturationFunc     = func(bin uint8, peers, connected *pslice.PSlice, filter kademlia.PeerFilterFunc) (bool, bool) {
 			f := *saturationFuncImpl
 			return f(bin, peers, connected, filter)
 		}
@@ -499,8 +498,8 @@ func TestManageWithBalancing(t *testing.T) {
 	kad.SetRadius(swarm.MaxPO) // don't use radius for checks
 
 	// implement saturation function (while having access to Kademlia instance)
-	sfImpl := func(bin uint8, peers, connected *pslice.PSlice, _ kademlia.PeerFilterFunc) bool {
-		return false
+	sfImpl := func(bin uint8, peers, connected *pslice.PSlice, _ kademlia.PeerFilterFunc) (bool, bool) {
+		return kad.IsBalanced(bin), false
 	}
 	saturationFuncImpl = &sfImpl
 
@@ -549,9 +548,9 @@ func TestManageWithBalancing(t *testing.T) {
 // in shallower depth for the rest of the function to be executed
 func TestBinSaturation(t *testing.T) {
 	defer func(p int) {
-		*kademlia.SaturationPeers = p
-	}(*kademlia.SaturationPeers)
-	*kademlia.SaturationPeers = 2
+		*kademlia.QuickSaturationPeers = p
+	}(*kademlia.QuickSaturationPeers)
+	*kademlia.QuickSaturationPeers = 2
 
 	var (
 		conns                    int32 // how many connect calls were made to the p2p mock
@@ -603,6 +602,10 @@ func TestBinSaturation(t *testing.T) {
 }
 
 func TestOversaturation(t *testing.T) {
+	defer func(p int) {
+		*kademlia.OverSaturationPeers = p
+	}(*kademlia.OverSaturationPeers)
+	*kademlia.OverSaturationPeers = 8
 
 	var (
 		conns                    int32 // how many connect calls were made to the p2p mock
@@ -642,6 +645,15 @@ func TestOversaturation(t *testing.T) {
 				t.Fatal("should not pick the peer")
 			}
 		}
+		// see depth is still as expected
+		kDepth(t, kad, 5)
+	}
+
+	// see we can still add / not limiting more peers in neighborhood depth
+	for m := 0; m < 12; m++ {
+		addr := test.RandomAddressAt(base, 5)
+		// if error is not nil as specified, connectOne goes fatal
+		connectOne(t, signer, kad, ab, addr, nil)
 		// see depth is still as expected
 		kDepth(t, kad, 5)
 	}
@@ -1363,7 +1375,7 @@ func TestOutofDepthPrune(t *testing.T) {
 	defer func(p int) {
 		*kademlia.OverSaturationPeers = p
 	}(*kademlia.OverSaturationPeers)
-	*kademlia.OverSaturationPeers = 16
+	*kademlia.OverSaturationPeers = 8
 
 	var (
 		conns, failedConns int32 // how many connect calls were made to the p2p mock
@@ -1510,14 +1522,16 @@ func TestLatency(t *testing.T) {
 }
 
 func TestBootnodeProtectedNodes(t *testing.T) {
-	defer func(a, b, c int) {
+	defer func(a, b, c, d int) {
 		*kademlia.BootnodeOverSaturationPeers = a
 		*kademlia.SaturationPeers = b
 		*kademlia.LowWaterMark = c
-	}(*kademlia.BootnodeOverSaturationPeers, *kademlia.SaturationPeers, *kademlia.LowWaterMark)
+		*kademlia.QuickSaturationPeers = d
+	}(*kademlia.BootnodeOverSaturationPeers, *kademlia.SaturationPeers, *kademlia.LowWaterMark, *kademlia.QuickSaturationPeers)
 	*kademlia.BootnodeOverSaturationPeers = 1
 	*kademlia.SaturationPeers = 1
 	*kademlia.LowWaterMark = 0
+	*kademlia.QuickSaturationPeers = 1
 
 	// create base and protected nodes addresses
 	base := test.RandomAddress()
@@ -1752,8 +1766,8 @@ func mineBin(t *testing.T, base swarm.Address, bin, count int, isBalanced bool) 
 	}
 
 	if isBalanced {
-		prefixes := kademlia.GenerateCommonBinPrefixes(base, kademlia.BitSuffixLength)
-		for i := 0; i < int(math.Pow(2, float64(kademlia.BitSuffixLength))); i++ {
+		prefixes := kademlia.GenerateCommonBinPrefixes(base, 3)
+		for i := 0; i < 8; i++ {
 			rndAddrs[i] = prefixes[bin][i]
 		}
 	} else {

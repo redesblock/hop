@@ -52,6 +52,12 @@ type BlockHeightContractFilterer interface {
 	BlockNumber(context.Context) (uint64, error)
 }
 
+// Shutdowner interface is passed to the listener to shutdown the node if we hit
+// error while listening for blockchain events.
+type Shutdowner interface {
+	Shutdown(context.Context) error
+}
+
 type listener struct {
 	logger    logging.Logger
 	ev        BlockHeightContractFilterer
@@ -61,28 +67,28 @@ type listener struct {
 	quit                chan struct{}
 	wg                  sync.WaitGroup
 	metrics             metrics
+	shutdowner          Shutdowner
 	stallingTimeout     time.Duration
 	backoffTime         time.Duration
-	syncingStopped      chan struct{}
 }
 
 func New(
-	syncingStopped chan struct{},
 	logger logging.Logger,
 	ev BlockHeightContractFilterer,
 	postageStampAddress common.Address,
 	blockTime uint64,
+	shutdowner Shutdowner,
 	stallingTimeout time.Duration,
 	backoffTime time.Duration,
 ) postage.Listener {
 	return &listener{
-		syncingStopped:      syncingStopped,
 		logger:              logger,
 		ev:                  ev,
 		blockTime:           blockTime,
 		postageStampAddress: postageStampAddress,
 		quit:                make(chan struct{}),
 		metrics:             newMetrics(),
+		shutdowner:          shutdowner,
 		stallingTimeout:     stallingTimeout,
 		backoffTime:         backoffTime,
 	}
@@ -167,7 +173,7 @@ func (l *listener) processEvent(e types.Log, updater postage.EventUpdater) error
 	}
 }
 
-func (l *listener) Listen(from uint64, updater postage.EventUpdater, initState *postage.ChainSnapshot) <-chan error {
+func (l *listener) Listen(from uint64, updater postage.EventUpdater, initState *postage.ChainSnapshot) <-chan struct{} {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		<-l.quit
@@ -222,7 +228,7 @@ func (l *listener) Listen(from uint64, updater postage.EventUpdater, initState *
 
 	l.logger.Debugf("listener: batch factor %d", batchFactor)
 
-	synced := make(chan error)
+	synced := make(chan struct{})
 	closeOnce := new(sync.Once)
 	paged := make(chan struct{}, 1)
 	paged <- struct{}{}
@@ -292,7 +298,7 @@ func (l *listener) Listen(from uint64, updater postage.EventUpdater, initState *
 				paged <- struct{}{}
 				to = from + blockPage - 1
 			} else {
-				closeOnce.Do(func() { synced <- nil })
+				closeOnce.Do(func() { close(synced) })
 			}
 			l.metrics.BackendCalls.Inc()
 
@@ -324,9 +330,13 @@ func (l *listener) Listen(from uint64, updater postage.EventUpdater, initState *
 				return
 			}
 			l.logger.Errorf("failed syncing event listener, shutting down node err: %v", err)
+			if l.shutdowner != nil {
+				err = l.shutdowner.Shutdown(context.Background())
+				if err != nil {
+					l.logger.Errorf("failed shutting down node: %v", err)
+				}
+			}
 		}
-		closeOnce.Do(func() { synced <- err })
-		close(l.syncingStopped) // trigger shutdown in start.go
 	}()
 
 	return synced

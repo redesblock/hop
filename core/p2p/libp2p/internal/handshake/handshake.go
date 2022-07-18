@@ -45,7 +45,7 @@ var (
 	ErrWelcomeMessageLength = fmt.Errorf("handshake welcome message longer than maximum of %d characters", MaxWelcomeMessageLength)
 
 	// ErrPicker is returned if the picker (kademlia) rejects the peer
-	ErrPicker = errors.New("picker rejection")
+	ErrPicker = fmt.Errorf("picker rejection")
 )
 
 // AdvertisableAddressResolver can Resolve a Multiaddress.
@@ -205,7 +205,7 @@ func (s *Service) Handshake(ctx context.Context, stream p2p.Stream, peerMultiadd
 
 	s.logger.Tracef("handshake finished for peer (outbound) %s", remoteHopAddress.Overlay.String())
 	if len(resp.Ack.WelcomeMessage) > 0 {
-		s.logger.Debugf("greeting %q from peer: %s", resp.Ack.WelcomeMessage, remoteHopAddress.Overlay.String())
+		s.logger.Infof("greeting \"%s\" from peer: %s", resp.Ack.WelcomeMessage, remoteHopAddress.Overlay.String())
 	}
 
 	return &Info{
@@ -311,7 +311,7 @@ func (s *Service) Handle(ctx context.Context, stream p2p.Stream, remoteMultiaddr
 
 	s.logger.Tracef("handshake finished for peer (inbound) %s", remoteHopAddress.Overlay.String())
 	if len(ack.WelcomeMessage) > 0 {
-		s.logger.Debugf("greeting %q from peer: %s", ack.WelcomeMessage, remoteHopAddress.Overlay.String())
+		s.logger.Infof("greeting \"%s\" from peer: %s", ack.WelcomeMessage, remoteHopAddress.Overlay.String())
 	}
 
 	return &Info{

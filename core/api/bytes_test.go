@@ -3,10 +3,8 @@ package api_test
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"net/http"
-	"strconv"
 	"testing"
 
 	"github.com/redesblock/hop/core/api"
@@ -14,7 +12,6 @@ import (
 	"github.com/redesblock/hop/core/jsonhttp/jsonhttptest"
 	"github.com/redesblock/hop/core/logging"
 	pinning "github.com/redesblock/hop/core/pinning/mock"
-	mockbatchstore "github.com/redesblock/hop/core/postage/batchstore/mock"
 	mockpost "github.com/redesblock/hop/core/postage/mock"
 	statestore "github.com/redesblock/hop/core/statestore/mock"
 	"github.com/redesblock/hop/core/storage/mock"
@@ -121,25 +118,6 @@ func TestBytes(t *testing.T) {
 		}
 	})
 
-	t.Run("head", func(t *testing.T) {
-		resp := request(t, client, http.MethodHead, resource+"/"+expHash, nil, http.StatusOK)
-		if int(resp.ContentLength) != len(content) {
-			t.Fatalf("length %d want %d", resp.ContentLength, len(content))
-		}
-	})
-	t.Run("head with compression", func(t *testing.T) {
-		resp := jsonhttptest.Request(t, client, http.MethodHead, resource+"/"+expHash, http.StatusOK,
-			jsonhttptest.WithRequestHeader("Accept-Encoding", "gzip"),
-		)
-		val, err := strconv.Atoi(resp.Get("Content-Length"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if val != len(content) {
-			t.Fatalf("length %d want %d", val, len(content))
-		}
-	})
-
 	t.Run("not found", func(t *testing.T) {
 		jsonhttptest.Request(t, client, http.MethodGet, resource+"/0xabcd", http.StatusNotFound,
 			jsonhttptest.WithExpectedJSONResponse(jsonhttp.StatusResponse{
@@ -156,91 +134,5 @@ func TestBytes(t *testing.T) {
 				Code:    http.StatusInternalServerError,
 			}),
 		)
-	})
-
-	t.Run("upload multipart error", func(t *testing.T) {
-		jsonhttptest.Request(t, client, http.MethodPost, resource, http.StatusBadRequest,
-			jsonhttptest.WithRequestHeader(api.SwarmDeferredUploadHeader, "true"),
-			jsonhttptest.WithRequestHeader(api.SwarmPostageBatchIdHeader, batchOkStr),
-			jsonhttptest.WithRequestHeader(api.ContentTypeHeader, "multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW"),
-			jsonhttptest.WithRequestBody(bytes.NewReader(content)),
-		)
-	})
-}
-
-func TestBytesInvalidStamp(t *testing.T) {
-	const (
-		resource = "/bytes"
-		expHash  = "29a5fb121ce96194ba8b7b823a1f9c6af87e1791f824940a53b5a7efe3f790d9"
-	)
-
-	var (
-		storerMock        = mock.NewStorer()
-		pinningMock       = pinning.NewServiceMock()
-		logger            = logging.New(io.Discard, 0)
-		retBool           = false
-		retErr      error = nil
-		existsFn          = func(id []byte) (bool, error) {
-			return retBool, retErr
-		}
-		client, _, _, _ = newTestServer(t, testServerOptions{
-			Storer:     storerMock,
-			Tags:       tags.NewTags(statestore.NewStateStore(), logging.New(io.Discard, 0)),
-			Pinning:    pinningMock,
-			Logger:     logger,
-			Post:       mockpost.New(mockpost.WithAcceptAll()),
-			BatchStore: mockbatchstore.New(mockbatchstore.WithExistsFunc(existsFn)),
-		})
-	)
-
-	g := mockbytes.New(0, mockbytes.MockTypeStandard).WithModulus(255)
-	content, err := g.SequentialBytes(swarm.ChunkSize * 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Run("upload, batch doesn't exist", func(t *testing.T) {
-		chunkAddr := swarm.MustParseHexAddress(expHash)
-		jsonhttptest.Request(t, client, http.MethodPost, resource, http.StatusBadRequest,
-			jsonhttptest.WithRequestHeader(api.SwarmDeferredUploadHeader, "true"),
-			jsonhttptest.WithRequestHeader(api.SwarmPostageBatchIdHeader, batchOkStr),
-			jsonhttptest.WithRequestBody(bytes.NewReader(content)),
-		)
-
-		has, err := storerMock.Has(context.Background(), chunkAddr)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if has {
-			t.Fatal("storer check root chunk address: have ont; want none")
-		}
-
-		refs, err := pinningMock.Pins()
-		if err != nil {
-			t.Fatal("unable to get pinned references")
-		}
-		if have, want := len(refs), 0; have != want {
-			t.Fatalf("root pin count mismatch: have %d; want %d", have, want)
-		}
-	})
-
-	// throw back an error
-	retErr = errors.New("err happened")
-
-	t.Run("upload, batch exists error", func(t *testing.T) {
-		chunkAddr := swarm.MustParseHexAddress(expHash)
-		jsonhttptest.Request(t, client, http.MethodPost, resource, http.StatusBadRequest,
-			jsonhttptest.WithRequestHeader(api.SwarmDeferredUploadHeader, "true"),
-			jsonhttptest.WithRequestHeader(api.SwarmPostageBatchIdHeader, batchOkStr),
-			jsonhttptest.WithRequestBody(bytes.NewReader(content)),
-		)
-
-		has, err := storerMock.Has(context.Background(), chunkAddr)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if has {
-			t.Fatal("storer check root chunk address: have ont; want none")
-		}
 	})
 }

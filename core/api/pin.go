@@ -12,7 +12,7 @@ import (
 )
 
 // pinRootHash pins root hash of given reference. This method is idempotent.
-func (s *Service) pinRootHash(w http.ResponseWriter, r *http.Request) {
+func (s *server) pinRootHash(w http.ResponseWriter, r *http.Request) {
 	ref, err := swarm.ParseHexAddress(mux.Vars(r)["reference"])
 	if err != nil {
 		s.logger.Debugf("pin root hash: unable to parse reference %q: %v", ref, err)
@@ -48,7 +48,7 @@ func (s *Service) pinRootHash(w http.ResponseWriter, r *http.Request) {
 }
 
 // unpinRootHash unpin's an already pinned root hash. This method is idempotent.
-func (s *Service) unpinRootHash(w http.ResponseWriter, r *http.Request) {
+func (s *server) unpinRootHash(w http.ResponseWriter, r *http.Request) {
 	ref, err := swarm.ParseHexAddress(mux.Vars(r)["reference"])
 	if err != nil {
 		s.logger.Debugf("unpin root hash: unable to parse reference: %v", err)
@@ -85,7 +85,7 @@ func (s *Service) unpinRootHash(w http.ResponseWriter, r *http.Request) {
 }
 
 // getPinnedRootHash returns back the given reference if its root hash is pinned.
-func (s *Service) getPinnedRootHash(w http.ResponseWriter, r *http.Request) {
+func (s *server) getPinnedRootHash(w http.ResponseWriter, r *http.Request) {
 	ref, err := swarm.ParseHexAddress(mux.Vars(r)["reference"])
 	if err != nil {
 		s.logger.Debugf("pinned root hash: unable to parse reference %q: %v", ref, err)
@@ -115,7 +115,7 @@ func (s *Service) getPinnedRootHash(w http.ResponseWriter, r *http.Request) {
 }
 
 // listPinnedRootHashes lists all the references of the pinned root hashes.
-func (s *Service) listPinnedRootHashes(w http.ResponseWriter, r *http.Request) {
+func (s *server) listPinnedRootHashes(w http.ResponseWriter, r *http.Request) {
 	pinned, err := s.pinning.Pins()
 	if err != nil {
 		s.logger.Debugf("list pinned root references: unable to list references: %v", err)

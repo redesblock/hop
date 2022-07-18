@@ -23,7 +23,6 @@ import (
 	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/pricer"
 	"github.com/redesblock/hop/core/pushsync/pb"
-	"github.com/redesblock/hop/core/skippeers"
 	"github.com/redesblock/hop/core/soc"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
@@ -43,7 +42,7 @@ const (
 	p90TTL         = 5 * time.Second  // P90 request time to live
 	sanctionWait   = 5 * time.Minute
 	replicationTTL = 5 * time.Second // time to live for neighborhood replication
-	waitRefresh    = 600 * time.Millisecond
+
 )
 
 const (
@@ -56,7 +55,6 @@ var (
 	ErrNoPush            = errors.New("could not push chunk")
 	ErrOutOfDepthStoring = errors.New("storing outside of the neighborhood")
 	ErrWarmup            = errors.New("node warmup time not complete")
-	errNotAttempted      = errors.New("peer not attempted")
 )
 
 type PushSyncer interface {
@@ -164,7 +162,7 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 	chunk := swarm.NewChunk(swarm.NewAddress(ch.Address), ch.Data)
 	chunkAddress := chunk.Address()
 
-	span, logger, ctx := ps.tracer.StartSpanFromContext(ctx, "pushsync-handler", ps.logger, opentracing.Tag{Key: "address", Value: chunkAddress.String()})
+	span, _, ctx := ps.tracer.StartSpanFromContext(ctx, "pushsync-handler", ps.logger, opentracing.Tag{Key: "address", Value: chunkAddress.String()})
 	defer span.Finish()
 
 	stamp := new(postage.Stamp)
@@ -223,7 +221,7 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 				return fmt.Errorf("chunk store: %w", err)
 			}
 
-			debit, err := ps.accounting.PrepareDebit(ctx, p.Address, price)
+			debit, err := ps.accounting.PrepareDebit(p.Address, price)
 			if err != nil {
 				return fmt.Errorf("prepare debit to peer %s before writeback: %w", p.Address.String(), err)
 			}
@@ -255,12 +253,12 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 		if !storerNode && ps.warmedUp() && ps.topologyDriver.IsWithinDepth(chunkAddress) {
 			verifiedChunk, err := ps.validStamp(chunk, ch.Stamp)
 			if err != nil {
-				logger.Warningf("pushsync: forwarder, invalid stamp for chunk %s", chunkAddress.String())
+				ps.logger.Warningf("pushsync: forwarder, invalid stamp for chunk %s", chunkAddress.String())
 				return
 			}
 			_, err = ps.storer.Put(ctx, storage.ModePutSync, verifiedChunk)
 			if err != nil {
-				logger.Warningf("pushsync: within depth peer's attempt to store chunk failed: %v", err)
+				ps.logger.Warningf("pushsync: within depth peer's attempt to store chunk failed: %v", err)
 			}
 		}
 	}()
@@ -286,7 +284,7 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 			}
 
 			// return back receipt
-			debit, err := ps.accounting.PrepareDebit(ctx, p.Address, price)
+			debit, err := ps.accounting.PrepareDebit(p.Address, price)
 			if err != nil {
 				return fmt.Errorf("prepare debit to peer %s before writeback: %w", p.Address.String(), err)
 			}
@@ -307,7 +305,7 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 
 	ps.metrics.Forwarder.Inc()
 
-	debit, err := ps.accounting.PrepareDebit(ctx, p.Address, price)
+	debit, err := ps.accounting.PrepareDebit(p.Address, price)
 	if err != nil {
 		return fmt.Errorf("prepare debit to peer %s before writeback: %w", p.Address.String(), err)
 	}
@@ -355,7 +353,7 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, origin bo
 
 	var (
 		includeSelf = ps.isFullNode
-		skipPeers   = new(skippeers.List)
+		skipPeers   []swarm.Address
 	)
 
 	resultChan := make(chan receiptResult)
@@ -365,12 +363,11 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, origin bo
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 
-	// nextPeer attempts to lookup the next peer to push the chunk to, if there are overdrafted peers the boolean would signal a re-attempt
-	nextPeer := func() (peer swarm.Address, retry bool, err error) {
+	nextPeer := func() (swarm.Address, error) {
 
-		fullSkipList := append(ps.skipList.ChunkSkipPeers(ch.Address()), skipPeers.All()...)
+		fullSkipList := append(ps.skipList.ChunkSkipPeers(ch.Address()), skipPeers...)
 
-		peer, err = ps.topologyDriver.ClosestPeer(ch.Address(), includeSelf, topology.Filter{Reachable: true}, fullSkipList...)
+		peer, err := ps.topologyDriver.ClosestPeer(ch.Address(), includeSelf, topology.Filter{Reachable: true}, fullSkipList...)
 		if err != nil {
 			// ClosestPeer can return ErrNotFound in case we are not connected to any peers
 			// in which case we should return immediately.
@@ -378,28 +375,21 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, origin bo
 			if errors.Is(err, topology.ErrWantSelf) {
 
 				if !ps.warmedUp() {
-					return swarm.ZeroAddress, false, ErrWarmup
+					return swarm.ZeroAddress, ErrWarmup
 				}
 
-				if skipPeers.OverdraftListEmpty() { // no peers in skip list means we can be confident that we are the closest peer
-					// we don't act on ErrWantSelf unless there are no overdraft peers
-					if !ps.topologyDriver.IsWithinDepth(ch.Address()) {
-						return swarm.ZeroAddress, false, ErrOutOfDepthStoring
-					}
-					ps.pushToNeighbourhood(ctx, fullSkipList, ch, origin, originAddr)
-					return swarm.ZeroAddress, false, err
+				if !ps.topologyDriver.IsWithinDepth(ch.Address()) {
+					return swarm.ZeroAddress, ErrOutOfDepthStoring
 				}
 
-				ps.logger.Debug("pushsync: continue iteration and reset overdraft skiplist")
-
-				skipPeers.ResetOverdraft() // reset the overdraft list and retry (in case the closest peer was there)
-				return swarm.ZeroAddress, true, nil
+				ps.pushToNeighbourhood(ctx, fullSkipList, ch, origin, originAddr)
+				return swarm.ZeroAddress, err
 			}
 
-			return swarm.ZeroAddress, false, fmt.Errorf("closest peer: %w", err)
+			return swarm.ZeroAddress, fmt.Errorf("closest peer: %w", err)
 		}
 
-		return peer, false, nil
+		return peer, nil
 	}
 
 	for {
@@ -410,25 +400,16 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, origin bo
 
 			allowedRetries--
 			// decrement here to limit inflight requests, if the request is not "attempted", we will increment below
+			allowedPushes--
 
-			peer, retry, err := nextPeer()
+			peer, err := nextPeer()
 			if err != nil {
 				return nil, err
 			}
 
-			if retry {
-				if allowedRetries <= 0 {
-					return nil, ErrNoPush
-				}
-				timer.Reset(waitRefresh)
-				continue
-			}
-
 			ps.metrics.TotalSendAttempts.Inc()
 
-			skipPeers.Add(peer)
-
-			allowedPushes--
+			skipPeers = append(skipPeers, peer)
 
 			go func() {
 				ctxd, cancel := context.WithTimeout(ctx, defaultTTL)
@@ -448,12 +429,7 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, origin bo
 
 			ps.measurePushPeer(result.pushTime, result.err, origin)
 
-			if errors.Is(result.err, errNotAttempted) {
-				logger.Debugf("pushsync: not attempted: adding overdraft peer to skiplist %s", result.peer.String())
-				skipPeers.AddOverdraft(result.peer)
-			}
-
-			if ps.warmedUp() && !errors.Is(result.err, errNotAttempted) {
+			if ps.warmedUp() && !errors.Is(result.err, accounting.ErrOverdraft) {
 				ps.skipList.Add(ch.Address(), result.peer, sanctionWait)
 				ps.metrics.TotalSkippedPeers.Inc()
 				logger.Debugf("pushsync: adding to skiplist peer %s", result.peer.String())
@@ -470,12 +446,11 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk, origin bo
 					}
 					logger.Debugf("pushsync: push receipt %s to peer %s", swarm.NewAddress(result.receipt.Address), result.peer)
 				}
-
 				return result.receipt, nil
 			}
 
 			ps.metrics.TotalFailedSendAttempts.Inc()
-			logger.Debugf("pushsync: could not push to peer: %v", result.err)
+			logger.Debugf("pushsync: could not push to peer %s: %v", result.peer, result.err)
 
 			// pushPeer returned early, do not count as an attempt
 			if !result.pushed {
@@ -525,16 +500,9 @@ func (ps *PushSync) pushPeer(ctx context.Context, resultChan chan<- receiptResul
 	// compute the price we pay for this receipt and reserve it for the rest of this function
 	receiptPrice := ps.pricer.PeerPrice(peer, ch.Address())
 
-	creditCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-
 	// Reserve to see whether we can make the request
-	creditAction, err := ps.accounting.PrepareCredit(creditCtx, peer, receiptPrice, origin)
+	creditAction, err := ps.accounting.PrepareCredit(peer, receiptPrice, origin)
 	if err != nil {
-		if errors.Is(err, accounting.ErrOverdraft) || errors.Is(err, accounting.ErrFailToLock) {
-			err = fmt.Errorf("pushsync: prepare credit: %v: %w", err, errNotAttempted)
-			return
-		}
 		err = fmt.Errorf("reserve balance for peer %s: %w", peer, err)
 		return
 	}
@@ -630,6 +598,12 @@ func (ps *PushSync) pushToNeighbourhood(ctx context.Context, skiplist []swarm.Ad
 func (ps *PushSync) pushToNeighbour(ctx context.Context, peer swarm.Address, ch swarm.Chunk, origin bool) {
 	var err error
 	ps.metrics.TotalReplicatedAttempts.Inc()
+	defer func() {
+		if err != nil {
+			ps.logger.Tracef("pushsync replication: %v", err)
+			ps.metrics.TotalReplicatedError.Inc()
+		}
+	}()
 
 	// price for neighborhood replication
 	receiptPrice := ps.pricer.PeerPrice(peer, ch.Address())
@@ -643,19 +617,10 @@ func (ps *PushSync) pushToNeighbour(ctx context.Context, peer swarm.Address, ch 
 
 	// now bring in the span data to the new context
 	ctx = tracing.WithContext(ctx, span)
-	spanInner, logger, ctx := ps.tracer.StartSpanFromContext(ctx, "pushsync-replication", ps.logger, opentracing.Tag{Key: "address", Value: ch.Address().String()})
+	spanInner, _, ctx := ps.tracer.StartSpanFromContext(ctx, "pushsync-replication", ps.logger, opentracing.Tag{Key: "address", Value: ch.Address().String()})
 	defer spanInner.Finish()
-	defer func() {
-		if err != nil {
-			logger.Tracef("pushsync replication: %v", err)
-			ps.metrics.TotalReplicatedError.Inc()
-		}
-	}()
 
-	creditCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-
-	creditAction, err := ps.accounting.PrepareCredit(creditCtx, peer, receiptPrice, origin)
+	creditAction, err := ps.accounting.PrepareCredit(peer, receiptPrice, origin)
 	if err != nil {
 		err = fmt.Errorf("reserve balance for peer %s: %w", peer.String(), err)
 		return

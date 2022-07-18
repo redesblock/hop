@@ -31,11 +31,7 @@ var (
 	ErrSettlementTooSoon              = errors.New("settlement too soon")
 	ErrNoPseudoSettlePeer             = errors.New("settlement peer not found")
 	ErrDisconnectAllowanceCheckFailed = errors.New("settlement allowance below enforced amount")
-	ErrTimeOutOfSyncAlleged           = errors.New("settlement allowance timestamps from peer were decreasing")
-	ErrTimeOutOfSyncRecent            = errors.New("settlement allowance timestamps from peer differed from our measurement by more than 2 seconds")
-	ErrTimeOutOfSyncInterval          = errors.New("settlement allowance interval from peer differed from local interval by more than 3 seconds")
-	ErrRefreshmentBelowExpected       = errors.New("refreshment below expected")
-	ErrRefreshmentAboveExpected       = errors.New("refreshment above expected")
+	ErrTimeOutOfSync                  = errors.New("settlement allowance timestamps differ beyond tolerance")
 )
 
 type Service struct {
@@ -316,7 +312,7 @@ func (s *Service) Pay(ctx context.Context, peer swarm.Address, amount, checkAllo
 
 	acceptedAmount := new(big.Int).SetBytes(paymentAck.Amount)
 	if acceptedAmount.Cmp(amount) > 0 {
-		err = fmt.Errorf("pseudosettle: peer %v: %w", peer, ErrRefreshmentAboveExpected)
+		err = fmt.Errorf("pseudosettle peer %v accepted payment larger than expected", peer)
 		return nil, 0, err
 	}
 
@@ -324,18 +320,18 @@ func (s *Service) Pay(ctx context.Context, peer swarm.Address, amount, checkAllo
 	allegedInterval := paymentAck.Timestamp - lastTime.Timestamp
 
 	if allegedInterval < 0 {
-		return nil, 0, ErrTimeOutOfSyncAlleged
+		return nil, 0, ErrTimeOutOfSync
 	}
 
 	experienceDifferenceRecent := paymentAck.Timestamp - checkTime
 
 	if experienceDifferenceRecent < -2 || experienceDifferenceRecent > 2 {
-		return nil, 0, ErrTimeOutOfSyncRecent
+		return nil, 0, ErrTimeOutOfSync
 	}
 
 	experienceDifferenceInterval := experiencedInterval - allegedInterval
 	if experienceDifferenceInterval < -3 || experienceDifferenceInterval > 3 {
-		return nil, 0, ErrTimeOutOfSyncInterval
+		return nil, 0, ErrTimeOutOfSync
 	}
 
 	// enforce allowance
@@ -347,7 +343,7 @@ func (s *Service) Pay(ctx context.Context, peer swarm.Address, amount, checkAllo
 
 	if expectedAllowance.Cmp(acceptedAmount) > 0 {
 		// disconnect peer
-		err = fmt.Errorf("pseudosettle: peer %v: %w", peer, ErrRefreshmentBelowExpected)
+		err = fmt.Errorf("pseudosettle peer %v accepted lower payment than expected", peer)
 		return nil, 0, err
 	}
 

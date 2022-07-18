@@ -1,10 +1,9 @@
-// Package api provides the functionality of the hop
+// Package api provides the functionality of the Bee
 // client-facing HTTP API.
 package api
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -12,7 +11,6 @@ import (
 	"io"
 	"io/ioutil"
 	"math"
-	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,10 +18,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/gorilla/mux"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/redesblock/hop/core/accounting"
 	"github.com/redesblock/hop/core/auth"
 	"github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/feeds"
@@ -31,29 +25,21 @@ import (
 	"github.com/redesblock/hop/core/file/pipeline/builder"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/logging"
-	"github.com/redesblock/hop/core/p2p"
-	"github.com/redesblock/hop/core/pingpong"
+	m "github.com/redesblock/hop/core/metrics"
 	"github.com/redesblock/hop/core/pinning"
 	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/postage/postagecontract"
 	"github.com/redesblock/hop/core/pss"
 	"github.com/redesblock/hop/core/pusher"
 	"github.com/redesblock/hop/core/resolver"
-	"github.com/redesblock/hop/core/settlement"
-	"github.com/redesblock/hop/core/settlement/swap"
-	"github.com/redesblock/hop/core/settlement/swap/chequebook"
-	"github.com/redesblock/hop/core/settlement/swap/erc20"
 	"github.com/redesblock/hop/core/steward"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
 	"github.com/redesblock/hop/core/topology"
-	"github.com/redesblock/hop/core/topology/lightnode"
 	"github.com/redesblock/hop/core/tracing"
-	"github.com/redesblock/hop/core/transaction"
 	"github.com/redesblock/hop/core/traversal"
 	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
 )
 
 const (
@@ -97,8 +83,14 @@ var (
 	errDirectoryStore       = errors.New("could not store directory")
 	errFileStore            = errors.New("could not store file")
 	errInvalidPostageBatch  = errors.New("invalid postage batch id")
-	errBatchUnusable        = errors.New("batch not usable")
 )
+
+// Service is the API service interface.
+type Service interface {
+	http.Handler
+	m.Collector
+	io.Closer
+}
 
 type authenticator interface {
 	Authorize(string) bool
@@ -107,7 +99,7 @@ type authenticator interface {
 	Enforce(string, string, string) (bool, error)
 }
 
-type Service struct {
+type server struct {
 	auth            authenticator
 	tags            *tags.Tags
 	storer          storage.Storer
@@ -123,58 +115,12 @@ type Service struct {
 	post            postage.Service
 	postageContract postagecontract.Interface
 	chunkPushC      chan *pusher.Op
-	metricsRegistry *prometheus.Registry
 	Options
-
 	http.Handler
-	router *mux.Router
-
 	metrics metrics
 
 	wsWg sync.WaitGroup // wait for all websockets to close on exit
 	quit chan struct{}
-
-	// from debug API
-	overlay           *swarm.Address
-	publicKey         ecdsa.PublicKey
-	pssPublicKey      ecdsa.PublicKey
-	ethereumAddress   common.Address
-	chequebookEnabled bool
-	swapEnabled       bool
-
-	topologyDriver topology.Driver
-	p2p            p2p.DebugService
-	accounting     accounting.Interface
-	chequebook     chequebook.Service
-	pseudosettle   settlement.Interface
-	pingpong       pingpong.Interface
-	batchStore     postage.Storer
-
-	swap        swap.Interface
-	transaction transaction.Service
-	lightNodes  *lightnode.Container
-	blockTime   *big.Int
-
-	postageSem       *semaphore.Weighted
-	cashOutChequeSem *semaphore.Weighted
-	hopMode          hopNodeMode
-	gatewayMode      bool
-
-	chainBackend transaction.Backend
-	erc20Service erc20.Service
-	chainID      int64
-}
-
-func (s *Service) SetP2P(p2p p2p.DebugService) {
-	if s != nil {
-		s.p2p = p2p
-	}
-}
-
-func (s *Service) SetSwarmAddress(addr *swarm.Address) {
-	if s != nil {
-		s.overlay = addr
-	}
 }
 
 type Options struct {
@@ -184,89 +130,41 @@ type Options struct {
 	Restricted         bool
 }
 
-type ExtraOptions struct {
-	Pingpong         pingpong.Interface
-	TopologyDriver   topology.Driver
-	LightNodes       *lightnode.Container
-	Accounting       accounting.Interface
-	Pseudosettle     settlement.Interface
-	Swap             swap.Interface
-	Chequebook       chequebook.Service
-	BlockTime        *big.Int
-	Tags             *tags.Tags
-	Storer           storage.Storer
-	Resolver         resolver.Interface
-	Pss              pss.Interface
-	TraversalService traversal.Traverser
-	Pinning          pinning.Interface
-	FeedFactory      feeds.Factory
-	Post             postage.Service
-	PostageContract  postagecontract.Interface
-	Steward          steward.Interface
-}
+const (
+	// TargetsRecoveryHeader defines the Header for Recovery targets in Global Pinning
+	TargetsRecoveryHeader = "swarm-recovery-targets"
+)
 
-func New(publicKey, pssPublicKey ecdsa.PublicKey, ethereumAddress common.Address, logger logging.Logger, transaction transaction.Service, batchStore postage.Storer, gatewayMode bool, hopMode hopNodeMode, chequebookEnabled bool, swapEnabled bool, cors []string) *Service {
-	s := new(Service)
+// New will create a and initialize a new API service.
+func New(tags *tags.Tags, storer storage.Storer, resolver resolver.Interface, pss pss.Interface, traversalService traversal.Traverser, pinning pinning.Interface, feedFactory feeds.Factory, post postage.Service, postageContract postagecontract.Interface, steward steward.Interface, signer crypto.Signer, auth authenticator, logger logging.Logger, tracer *tracing.Tracer, o Options) (Service, <-chan *pusher.Op) {
+	s := &server{
+		auth:            auth,
+		tags:            tags,
+		storer:          storer,
+		resolver:        resolver,
+		pss:             pss,
+		traversal:       traversalService,
+		pinning:         pinning,
+		feedFactory:     feedFactory,
+		post:            post,
+		postageContract: postageContract,
+		steward:         steward,
+		chunkPushC:      make(chan *pusher.Op),
+		signer:          signer,
+		Options:         o,
+		logger:          logger,
+		tracer:          tracer,
+		metrics:         newMetrics(),
+		quit:            make(chan struct{}),
+	}
 
-	s.CORSAllowedOrigins = cors
-	s.hopMode = hopMode
-	s.gatewayMode = gatewayMode
-	s.logger = logger
-	s.chequebookEnabled = chequebookEnabled
-	s.swapEnabled = swapEnabled
-	s.publicKey = publicKey
-	s.pssPublicKey = pssPublicKey
-	s.ethereumAddress = ethereumAddress
-	s.transaction = transaction
-	s.batchStore = batchStore
-	s.metricsRegistry = newDebugMetrics()
+	s.setupRouting()
 
-	return s
-}
-
-// Configure will create a and initialize a new API service.
-func (s *Service) Configure(signer crypto.Signer, auth authenticator, tracer *tracing.Tracer, o Options, e ExtraOptions, chainID int64, chainBackend transaction.Backend, erc20 erc20.Service) <-chan *pusher.Op {
-	s.auth = auth
-	s.chunkPushC = make(chan *pusher.Op)
-	s.signer = signer
-	s.Options = o
-	s.tracer = tracer
-	s.metrics = newMetrics()
-
-	s.quit = make(chan struct{})
-
-	s.tags = e.Tags
-	s.storer = e.Storer
-	s.resolver = e.Resolver
-	s.pss = e.Pss
-	s.traversal = e.TraversalService
-	s.pinning = e.Pinning
-	s.feedFactory = e.FeedFactory
-	s.post = e.Post
-	s.postageContract = e.PostageContract
-	s.steward = e.Steward
-
-	s.pingpong = e.Pingpong
-	s.topologyDriver = e.TopologyDriver
-	s.accounting = e.Accounting
-	s.chequebook = e.Chequebook
-	s.swap = e.Swap
-	s.lightNodes = e.LightNodes
-	s.pseudosettle = e.Pseudosettle
-	s.blockTime = e.BlockTime
-
-	s.postageSem = semaphore.NewWeighted(1)
-	s.cashOutChequeSem = semaphore.NewWeighted(1)
-
-	s.chainID = chainID
-	s.erc20Service = erc20
-	s.chainBackend = chainBackend
-
-	return s.chunkPushC
+	return s, s.chunkPushC
 }
 
 // Close hangs up running websockets on shutdown.
-func (s *Service) Close() error {
+func (s *server) Close() error {
 	s.logger.Info("api shutting down")
 	close(s.quit)
 
@@ -287,7 +185,7 @@ func (s *Service) Close() error {
 
 // getOrCreateTag attempts to get the tag if an id is supplied, and returns an error if it does not exist.
 // If no id is supplied, it will attempt to create a new tag with a generated name and return it.
-func (s *Service) getOrCreateTag(tagUid string) (*tags.Tag, bool, error) {
+func (s *server) getOrCreateTag(tagUid string) (*tags.Tag, bool, error) {
 	// if tag ID is not supplied, create a new tag
 	if tagUid == "" {
 		tag, err := s.tags.Create(0)
@@ -300,7 +198,7 @@ func (s *Service) getOrCreateTag(tagUid string) (*tags.Tag, bool, error) {
 	return t, false, err
 }
 
-func (s *Service) getTag(tagUid string) (*tags.Tag, error) {
+func (s *server) getTag(tagUid string) (*tags.Tag, error) {
 	uid, err := strconv.Atoi(tagUid)
 	if err != nil {
 		return nil, fmt.Errorf("cannot parse taguid: %w", err)
@@ -308,7 +206,7 @@ func (s *Service) getTag(tagUid string) (*tags.Tag, error) {
 	return s.tags.Get(uint32(uid))
 }
 
-func (s *Service) resolveNameOrAddress(str string) (swarm.Address, error) {
+func (s *server) resolveNameOrAddress(str string) (swarm.Address, error) {
 	log := s.logger
 
 	// Try and parse the name as a hop address.
@@ -377,7 +275,7 @@ type securityTokenReq struct {
 	Expiry int    `json:"expiry"`
 }
 
-func (s *Service) authHandler(w http.ResponseWriter, r *http.Request) {
+func (s *server) authHandler(w http.ResponseWriter, r *http.Request) {
 	_, pass, ok := r.BasicAuth()
 
 	if !ok {
@@ -429,7 +327,7 @@ func (s *Service) authHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Service) refreshHandler(w http.ResponseWriter, r *http.Request) {
+func (s *server) refreshHandler(w http.ResponseWriter, r *http.Request) {
 	reqToken := r.Header.Get("Authorization")
 	if !strings.HasPrefix(reqToken, "Bearer ") {
 		jsonhttp.Forbidden(w, "Missing bearer token")
@@ -481,7 +379,7 @@ func (s *Service) refreshHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Service) newTracingHandler(spanName string) func(h http.Handler) http.Handler {
+func (s *server) newTracingHandler(spanName string) func(h http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx, err := s.tracer.WithContextFromHTTPHeaders(r.Context(), r.Header)
@@ -504,7 +402,7 @@ func (s *Service) newTracingHandler(spanName string) func(h http.Handler) http.H
 	}
 }
 
-func (s *Service) contentLengthMetricMiddleware() func(h http.Handler) http.Handler {
+func (s *server) contentLengthMetricMiddleware() func(h http.Handler) http.Handler {
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			now := time.Now()
@@ -544,22 +442,8 @@ func lookaheadBufferSize(size int64) int {
 	return largeFileBufferSize
 }
 
-// corsHandler sets CORS headers to HTTP response if allowed origins are configured.
-func (s *Service) corsHandler(h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if o := r.Header.Get("Origin"); o != "" && s.checkOrigin(r) {
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Origin", o)
-			w.Header().Set("Access-Control-Allow-Headers", "User-Agent, Origin, Accept, Authorization, Content-Type, X-Requested-With, Decompressed-Content-Length, Access-Control-Request-Headers, Access-Control-Request-Method, Swarm-Tag, Swarm-Pin, Swarm-Encrypt, Swarm-Index-Document, Swarm-Error-Document, Swarm-Collection, Swarm-Postage-Batch-Id, Gas-Price, Range, Accept-Ranges, Content-Encoding")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS, POST, PUT, DELETE")
-			w.Header().Set("Access-Control-Max-Age", "3600")
-		}
-		h.ServeHTTP(w, r)
-	})
-}
-
 // checkOrigin returns true if the origin is not set or is equal to the request host.
-func (s *Service) checkOrigin(r *http.Request) bool {
+func (s *server) checkOrigin(r *http.Request) bool {
 	origin := r.Header["Origin"]
 	if len(origin) == 0 {
 		return true
@@ -606,7 +490,7 @@ func equalASCIIFold(s, t string) bool {
 // according to whether the upload is a deferred upload or not. in the case of
 // direct push to the network (default) a pushStamperPutter is returned.
 // returns a function to wait on the errorgroup in case of a pushing stamper putter.
-func (s *Service) newStamperPutter(r *http.Request) (storage.Storer, func() error, error) {
+func (s *server) newStamperPutter(r *http.Request) (storage.Storer, func() error, error) {
 	batch, err := requestPostageBatchId(r)
 	if err != nil {
 		return nil, noopWaitFn, fmt.Errorf("postage batch id: %w", err)
@@ -615,20 +499,6 @@ func (s *Service) newStamperPutter(r *http.Request) (storage.Storer, func() erro
 	deferred, err := requestDeferred(r)
 	if err != nil {
 		return nil, noopWaitFn, fmt.Errorf("request deferred: %w", err)
-	}
-
-	exists, err := s.batchStore.Exists(batch)
-	if err != nil {
-		return nil, noopWaitFn, fmt.Errorf("batch exists: %w", err)
-	}
-
-	issuer, err := s.post.GetStampIssuer(batch)
-	if err != nil {
-		return nil, noopWaitFn, fmt.Errorf("stamp issuer: %w", err)
-	}
-
-	if usable := exists && s.post.IssuerUsable(issuer); !usable {
-		return nil, noopWaitFn, errBatchUnusable
 	}
 
 	if deferred {

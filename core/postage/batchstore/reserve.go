@@ -101,17 +101,19 @@ func (s *store) cleanup() error {
 
 	for _, b := range evictions {
 
+		s.logger.Debugf("batchstore: cleaning up batch %x", b.ID)
+
 		err := s.evictFn(b.ID)
 		if err != nil {
-			return fmt.Errorf("evict batch %x: %w", b.ID, err)
+			return err
 		}
 		err = s.store.Delete(valueKey(b.Value, b.ID))
 		if err != nil {
-			return fmt.Errorf("delete value key for batch %x: %w", b.ID, err)
+			return err
 		}
 		err = s.store.Delete(batchKey(b.ID))
 		if err != nil {
-			return fmt.Errorf("delete batch %x: %w", b.ID, err)
+			return err
 		}
 	}
 
@@ -141,8 +143,6 @@ func (s *store) computeRadius() error {
 	if err != nil {
 		return err
 	}
-
-	s.metrics.Commitment.Set(float64(totalCommitment))
 
 	oldRadius := s.rs.Radius
 

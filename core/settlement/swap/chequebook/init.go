@@ -3,7 +3,7 @@ package chequebook
 import (
 	"context"
 	"crypto/rand"
-	"errors"
+	"fmt"
 	"math/big"
 	"time"
 
@@ -91,9 +91,9 @@ func checkBalance(
 			case <-time.After(balanceCheckBackoffDuration):
 			case <-timeoutCtx.Done():
 				if insufficientERC20 {
-					return errors.New("insufficient HOP for initial deposit")
+					return fmt.Errorf("insufficient HOP for initial deposit")
 				} else {
-					return errors.New("insufficient ETH for initial deposit")
+					return fmt.Errorf("insufficient ETH for initial deposit")
 				}
 			}
 			continue

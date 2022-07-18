@@ -386,7 +386,7 @@ func (m noOpChainBackend) CodeAt(context.Context, common.Address, *big.Int) ([]b
 	return common.FromHex(hopabi.SimpleSwapFactoryDeployedBin), nil
 }
 func (m noOpChainBackend) CallContract(context.Context, ethereum.CallMsg, *big.Int) ([]byte, error) {
-	return nil, errors.New("disabled chain backend")
+	panic("chain no op: CallContract")
 }
 func (m noOpChainBackend) HeaderByNumber(context.Context, *big.Int) (*types.Header, error) {
 	h := new(types.Header)
@@ -428,5 +428,4 @@ func (m noOpChainBackend) FilterLogs(context.Context, ethereum.FilterQuery) ([]t
 func (m noOpChainBackend) ChainID(context.Context) (*big.Int, error) {
 	return big.NewInt(m.chainID), nil
 }
-
 func (m noOpChainBackend) Close() {}

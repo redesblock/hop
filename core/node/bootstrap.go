@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"io/ioutil"
 	"math/big"
 	"time"
 
@@ -19,7 +19,6 @@ import (
 	"github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/feeds"
 	"github.com/redesblock/hop/core/feeds/factory"
-	"github.com/redesblock/hop/core/file"
 	"github.com/redesblock/hop/core/file/joiner"
 	"github.com/redesblock/hop/core/file/loadsave"
 	"github.com/redesblock/hop/core/hive"
@@ -46,14 +45,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var (
-	snapshotFeed    = swarm.MustParseHexAddress("b181b084df07a550c9fc0007110bff67000fa92a090af6c5212fe8e19f888a28")
-	errDataMismatch = errors.New("data length mismatch")
-)
-
-const (
-	getSnapshotRetries = 3
-)
+var snapshotFeed = swarm.MustParseHexAddress("b181b084df07a550c9fc0007110bff67000fa92a090af6c5212fe8e19f888a28")
 
 func bootstrapNode(
 	addr string,
@@ -95,7 +87,9 @@ func bootstrapNode(
 	}
 
 	defer func() {
-		retErr = multierror.Append(new(multierror.Error), retErr, b.Shutdown()).ErrorOrNil()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		retErr = multierror.Append(new(multierror.Error), retErr, b.Shutdown(ctx)).ErrorOrNil()
 	}()
 
 	p2ps, err := libp2p.New(p2pCtx, signer, networkID, swarmAddress, addr, addressbook, stateStore, lightNodes, senderMatcher, logger, tracer, libp2p.Options{
@@ -203,46 +197,22 @@ func bootstrapNode(
 
 	logger.Info("bootstrap: trying to fetch stamps snapshot")
 
-	var (
-		snapshotReference swarm.Address
-		reader            file.Joiner
-		l                 int64
-		eventsJSON        []byte
-	)
-
-	for i := 0; i < getSnapshotRetries; i++ {
-		snapshotReference, err = getLatestSnapshot(ctx, ns, snapshotFeed)
-		if err != nil {
-			logger.Warningf("bootstrap: fetching snapshot: %v", err)
-			continue
-		}
-		break
-	}
+	snapshotReference, err := getLatestSnapshot(ctx, ns, snapshotFeed)
 	if err != nil {
 		return nil, err
 	}
 
-	for i := 0; i < getSnapshotRetries; i++ {
-		reader, l, err = joiner.New(ctx, ns, snapshotReference)
-		if err != nil {
-			logger.Warningf("bootstrap: file joiner: %v", err)
-			continue
-		}
-
-		eventsJSON, err = io.ReadAll(reader)
-		if err != nil {
-			logger.Warningf("bootstrap: reading: %v", err)
-			continue
-		}
-
-		if len(eventsJSON) != int(l) {
-			err = errDataMismatch
-			logger.Warningf("bootstrap: %v", err)
-			continue
-		}
-		break
-	}
+	reader, l, err := joiner.New(ctx, ns, snapshotReference)
 	if err != nil {
+		return nil, err
+	}
+
+	eventsJSON, err := ioutil.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(eventsJSON) != int(l) {
 		return nil, err
 	}
 
@@ -257,13 +227,13 @@ func bootstrapNode(
 
 // wait till some peers are connected. returns true if all is ok
 func waitPeers(kad *kademlia.Kad) bool {
-	for i := 0; i < 60; i++ {
+	for i := 0; i < 30; i++ {
 		items := 0
 		_ = kad.EachPeer(func(_ swarm.Address, _ uint8) (bool, bool, error) {
 			items++
 			return false, false, nil
 		}, topology.Filter{})
-		if items >= 25 {
+		if items >= 5 {
 			return true
 		}
 		time.Sleep(time.Second)

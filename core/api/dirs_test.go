@@ -130,7 +130,6 @@ func TestDirs(t *testing.T) {
 		},
 		{
 			name:              "nested files with extension",
-			doMultipart:       true,
 			expectedReference: swarm.MustParseHexAddress("4c9c76d63856102e54092c38a7cd227d769752d768b7adc8c3542e3dd9fcf295"),
 			files: []f{
 				{
@@ -448,36 +447,6 @@ func TestDirs(t *testing.T) {
 	}
 }
 
-func TestEmtpyDir(t *testing.T) {
-	var (
-		dirUploadResource = "/hop"
-		storer            = mock.NewStorer()
-		mockStatestore    = statestore.NewStateStore()
-		logger            = logging.New(io.Discard, 0)
-		client, _, _, _   = newTestServer(t, testServerOptions{
-			Storer:          storer,
-			Tags:            tags.NewTags(mockStatestore, logger),
-			Logger:          logger,
-			PreventRedirect: true,
-			Post:            mockpost.New(mockpost.WithAcceptAll()),
-		})
-	)
-
-	tarReader := tarEmptyDir(t)
-
-	jsonhttptest.Request(t, client, http.MethodPost, dirUploadResource,
-		http.StatusBadRequest,
-		jsonhttptest.WithRequestHeader(api.SwarmPostageBatchIdHeader, batchOkStr),
-		jsonhttptest.WithRequestBody(tarReader),
-		jsonhttptest.WithRequestHeader(api.SwarmCollectionHeader, "true"),
-		jsonhttptest.WithRequestHeader("Content-Type", api.ContentTypeTar),
-		jsonhttptest.WithExpectedJSONResponse(jsonhttp.StatusResponse{
-			Message: api.EmptyDir.Error(),
-			Code:    http.StatusBadRequest,
-		}),
-	)
-}
-
 // tarFiles receives an array of test case files and creates a new tar with those files as a collection
 // it returns a bytes.Buffer which can be used to read the created tar
 func tarFiles(t *testing.T, files []f) *bytes.Buffer {
@@ -516,29 +485,6 @@ func tarFiles(t *testing.T, files []f) *bytes.Buffer {
 	return &buf
 }
 
-func tarEmptyDir(t *testing.T) *bytes.Buffer {
-	t.Helper()
-
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-
-	hdr := &tar.Header{
-		Name: "empty/",
-		Mode: 0600,
-	}
-
-	if err := tw.WriteHeader(hdr); err != nil {
-		t.Fatal(err)
-	}
-
-	// finally close the tar writer
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	return &buf
-}
-
 func multipartFiles(t *testing.T, files []f) (*bytes.Buffer, string) {
 	t.Helper()
 
@@ -546,14 +492,11 @@ func multipartFiles(t *testing.T, files []f) (*bytes.Buffer, string) {
 	mw := multipart.NewWriter(&buf)
 
 	for _, file := range files {
-		filePath := path.Join(file.dir, file.name)
-		if file.filePath != "" {
-			filePath = file.filePath
-		}
-
 		hdr := make(textproto.MIMEHeader)
-		hdr.Set("Content-Disposition", fmt.Sprintf("form-data; name=%q", filePath))
+		if file.name != "" {
+			hdr.Set("Content-Disposition", fmt.Sprintf("form-data; name=%q", file.name))
 
+		}
 		contentType := file.header.Get("Content-Type")
 		if contentType != "" {
 			hdr.Set("Content-Type", contentType)

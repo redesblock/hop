@@ -24,7 +24,7 @@ type chunkAddressResponse struct {
 	Reference swarm.Address `json:"reference"`
 }
 
-func (s *Service) processUploadRequest(
+func (s *server) processUploadRequest(
 	r *http.Request,
 ) (ctx context.Context, tag *tags.Tag, putter storage.Putter, waitFn func() error, err error) {
 
@@ -58,7 +58,7 @@ func (s *Service) processUploadRequest(
 	return ctx, tag, putter, wait, nil
 }
 
-func (s *Service) chunkUploadHandler(w http.ResponseWriter, r *http.Request) {
+func (s *server) chunkUploadHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, tag, putter, wait, err := s.processUploadRequest(r)
 	if err != nil {
 		jsonhttp.BadRequest(w, err.Error())
@@ -159,8 +159,8 @@ func (s *Service) chunkUploadHandler(w http.ResponseWriter, r *http.Request) {
 	jsonhttp.Created(w, chunkAddressResponse{Reference: chunk.Address()})
 }
 
-func (s *Service) chunkGetHandler(w http.ResponseWriter, r *http.Request) {
-	nameOrHex := mux.Vars(r)["address"]
+func (s *server) chunkGetHandler(w http.ResponseWriter, r *http.Request) {
+	nameOrHex := mux.Vars(r)["addr"]
 	ctx := r.Context()
 
 	address, err := s.resolveNameOrAddress(nameOrHex)

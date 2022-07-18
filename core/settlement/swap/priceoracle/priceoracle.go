@@ -3,13 +3,13 @@ package priceoracle
 import (
 	"context"
 	"errors"
+	hopabi "github.com/redesblock/hop/contracts/abi"
 	"io"
 	"math/big"
 	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	hopabi "github.com/redesblock/hop/contracts/abi"
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/transaction"
 )

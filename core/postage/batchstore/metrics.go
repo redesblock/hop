@@ -6,7 +6,6 @@ import (
 )
 
 type metrics struct {
-	Commitment        prometheus.Gauge
 	Radius            prometheus.Gauge
 	StorageRadius     prometheus.Gauge
 	UnreserveDuration prometheus.HistogramVec
@@ -19,12 +18,6 @@ func newMetrics() metrics {
 	subsystem := "batchstore"
 
 	return metrics{
-		Commitment: prometheus.NewGauge(prometheus.GaugeOpts{
-			Namespace: m.Namespace,
-			Subsystem: subsystem,
-			Name:      "commitment",
-			Help:      "Sum of all batches' commitment.",
-		}),
 		Radius: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: m.Namespace,
 			Subsystem: subsystem,

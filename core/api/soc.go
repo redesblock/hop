@@ -21,7 +21,7 @@ type socPostResponse struct {
 	Reference swarm.Address `json:"reference"`
 }
 
-func (s *Service) socUploadHandler(w http.ResponseWriter, r *http.Request) {
+func (s *server) socUploadHandler(w http.ResponseWriter, r *http.Request) {
 	owner, err := hex.DecodeString(mux.Vars(r)["owner"])
 	if err != nil {
 		s.logger.Debugf("soc upload: bad owner: %v", err)

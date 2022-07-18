@@ -41,7 +41,6 @@ func NewHTTPAccessLogHandler(logger logging.Logger, level logrus.Level, tracer *
 			fields := logrus.Fields{
 				"ip":       ip,
 				"method":   r.Method,
-				"host":     r.Host,
 				"uri":      r.RequestURI,
 				"proto":    r.Proto,
 				"status":   status,

@@ -4,6 +4,7 @@ import (
 	crand "crypto/rand"
 	"io"
 	"math/big"
+	"reflect"
 	"testing"
 
 	"github.com/redesblock/hop/core/postage"
@@ -43,16 +44,8 @@ func TestSaveLoad(t *testing.T) {
 	test := func(id int64) {
 		psS := saved(id)
 		psL := loaded(id)
-
-		sMap := map[string]struct{}{}
-		for _, s := range psS.StampIssuers() {
-			sMap[string(s.ID())] = struct{}{}
-		}
-
-		for _, s := range psL.StampIssuers() {
-			if _, ok := sMap[string(s.ID())]; !ok {
-				t.Fatalf("mismatch between saved and loaded")
-			}
+		if !reflect.DeepEqual(psS.StampIssuers(), psL.StampIssuers()) {
+			t.Fatalf("load(save(service)) != service\n%v\n%v", psS.StampIssuers(), psL.StampIssuers())
 		}
 	}
 	test(0)

@@ -115,18 +115,12 @@ func (s *Store) create(index uint8, maxDataSize int, basedir fs.FS) (*shard, err
 func (s *Store) Read(ctx context.Context, loc Location, buf []byte) (err error) {
 	sh := s.shards[loc.Shard]
 	select {
-	case sh.reads <- read{ctx: ctx, buf: buf[:loc.Length], slot: loc.Slot}:
+	case sh.reads <- read{buf[:loc.Length], loc.Slot}:
 		s.metrics.TotalReadCalls.Inc()
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-sh.quit:
-		return ErrQuitting
 	}
 
-	// it is important that this select would NEVER respect the context
-	// cancellation. this would result in a deadlock on the shard, since
-	// the result of the operation must be drained from errc, allowing the
-	// shard to be able to handle new operations (#2932).
 	select {
 	case err = <-sh.errc:
 		if err != nil {
@@ -134,9 +128,9 @@ func (s *Store) Read(ctx context.Context, loc Location, buf []byte) (err error) 
 		}
 		return err
 	case <-s.quit:
-		// we need to make sure that the forever loop in shard.go can
-		// always return due to shutdown in case this goroutine goes away.
 		return ErrQuitting
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

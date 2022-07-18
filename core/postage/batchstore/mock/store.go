@@ -22,8 +22,6 @@ type BatchStore struct {
 	updateErr         error
 	updateErrDelayCnt int
 	resetCallCount    int
-
-	existsFn func([]byte) (bool, error)
 }
 
 // Option is an option passed to New.
@@ -79,20 +77,6 @@ func WithBatch(b *postage.Batch) Option {
 	return func(bs *BatchStore) {
 		bs.batch = b
 		bs.id = b.ID
-	}
-}
-
-func WithExistsFunc(f func([]byte) (bool, error)) Option {
-	return func(bs *BatchStore) {
-		bs.existsFn = f
-	}
-}
-
-func WithAcceptAllExistsFunc() Option {
-	return func(bs *BatchStore) {
-		bs.existsFn = func(_ []byte) (bool, error) {
-			return true, nil
-		}
 	}
 }
 
@@ -184,9 +168,6 @@ func (bs *BatchStore) SetRadiusSetter(r postage.RadiusSetter) {
 
 // Exists reports whether batch referenced by the give id exists.
 func (bs *BatchStore) Exists(id []byte) (bool, error) {
-	if bs.existsFn != nil {
-		return bs.existsFn(id)
-	}
 	return bytes.Equal(bs.id, id), nil
 }
 

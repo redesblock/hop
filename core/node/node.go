@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -31,6 +32,7 @@ import (
 	"github.com/redesblock/hop/core/chainsyncer"
 	"github.com/redesblock/hop/core/config"
 	"github.com/redesblock/hop/core/crypto"
+	"github.com/redesblock/hop/core/debugapi"
 	"github.com/redesblock/hop/core/feeds/factory"
 	"github.com/redesblock/hop/core/hive"
 	"github.com/redesblock/hop/core/localstore"
@@ -108,7 +110,6 @@ type Node struct {
 	chainSyncerCloser        io.Closer
 	shutdownInProgress       bool
 	shutdownMutex            sync.Mutex
-	syncingStopped           chan struct{}
 }
 
 type Options struct {
@@ -144,6 +145,7 @@ type Options struct {
 	SwapEnable                 bool
 	ChequebookEnable           bool
 	FullNodeMode               bool
+	ChainEnable                bool
 	Transaction                string
 	BlockHash                  string
 	PostageContractAddress     string
@@ -177,9 +179,7 @@ const (
 	mainnetNetworkID              = uint64(1)
 )
 
-var ErrInterruped = errors.New("interrupted")
-
-func New(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkID uint64, logger logging.Logger, libp2pPrivateKey, pssPrivateKey *ecdsa.PrivateKey, o *Options) (b *Node, err error) {
+func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkID uint64, logger logging.Logger, libp2pPrivateKey, pssPrivateKey *ecdsa.PrivateKey, o *Options) (b *Node, err error) {
 
 	tracer, tracerCloser, err := tracing.NewTracer(&tracing.Options{
 		Enabled:     o.TracingEnabled,
@@ -210,17 +210,7 @@ func New(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, sign
 		p2pCancel:      p2pCancel,
 		errorLogWriter: logger.WriterLevel(logrus.ErrorLevel),
 		tracerCloser:   tracerCloser,
-		syncingStopped: make(chan struct{}),
 	}
-
-	defer func(b *Node) {
-		if err != nil {
-			logger.Errorf("got error %v, shutting down...", err)
-			if err2 := b.Shutdown(); err2 != nil {
-				logger.Errorf("got error while shutting down: %v", err2)
-			}
-		}
-	}(b)
 
 	stateStore, err := InitStateStore(logger, o.DataDir)
 	if err != nil {
@@ -251,21 +241,7 @@ func New(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, sign
 		erc20Service       erc20.Service
 	)
 
-	chainEnabled := isChainEnabled(o, o.SwapEndpoint, logger)
-
-	var batchStore postage.Storer = new(postage.NoOpBatchStore)
-	var unreserveFn func([]byte, uint8) (uint64, error)
-
-	if chainEnabled {
-		var evictFn = func(b []byte) error {
-			_, err := unreserveFn(b, swarm.MaxPO+1)
-			return err
-		}
-		batchStore, err = batchstore.New(stateStore, evictFn, logger)
-		if err != nil {
-			return nil, fmt.Errorf("batchstore: %w", err)
-		}
-	}
+	chainEnabled := isChainEnabled(o, logger)
 
 	chainBackend, overlayEthAddress, chainID, transactionMonitor, transactionService, err = InitChain(
 		p2pCtx,
@@ -297,17 +273,14 @@ func New(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, sign
 		logger.Info("starting with restricted APIs")
 	}
 
-	// set up basic debug api endpoints for debugging and /health endpoint
-	hopNodeMode := api.LightMode
-	if o.FullNodeMode {
-		hopNodeMode = api.FullMode
-	} else if !chainEnabled {
-		hopNodeMode = api.UltraLightMode
-	}
-
-	var debugService *api.Service
+	var debugAPIService *debugapi.Service
 
 	if o.DebugAPIAddr != "" {
+		overlayEthAddress, err := signer.EthereumAddress()
+		if err != nil {
+			return nil, fmt.Errorf("eth address: %w", err)
+		}
+
 		if o.MutexProfile {
 			_ = runtime.SetMutexProfileFraction(1)
 		}
@@ -316,18 +289,24 @@ func New(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, sign
 			runtime.SetBlockProfileRate(1)
 		}
 
+		// set up basic debug api endpoints for debugging and /health endpoint
+		HopNodeMode := debugapi.LightMode
+		if o.FullNodeMode {
+			HopNodeMode = debugapi.FullMode
+		} else if !o.ChainEnable {
+			HopNodeMode = debugapi.UltraLightMode
+		}
+		debugAPIService = debugapi.New(*publicKey, pssPrivateKey.PublicKey, overlayEthAddress, logger, tracer, o.CORSAllowedOrigins, big.NewInt(int64(o.BlockTime)), transactionService, chainBackend, o.Restricted, authenticator, o.GatewayMode, HopNodeMode, chainID)
+
 		debugAPIListener, err := net.Listen("tcp", o.DebugAPIAddr)
 		if err != nil {
 			return nil, fmt.Errorf("debug api listener: %w", err)
 		}
 
-		debugService = api.New(*publicKey, pssPrivateKey.PublicKey, overlayEthAddress, logger, transactionService, batchStore, o.GatewayMode, hopNodeMode, o.ChequebookEnable, o.SwapEnable, o.CORSAllowedOrigins)
-		debugService.MountTechnicalDebug()
-
 		debugAPIServer := &http.Server{
 			IdleTimeout:       30 * time.Second,
 			ReadHeaderTimeout: 3 * time.Second,
-			Handler:           debugService,
+			Handler:           debugAPIService,
 			ErrorLog:          log.New(b.errorLogWriter, "", 0),
 		}
 
@@ -341,37 +320,6 @@ func New(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, sign
 		}()
 
 		b.debugAPIServer = debugAPIServer
-	}
-
-	var apiService *api.Service
-
-	if o.Restricted {
-		apiService = api.New(*publicKey, pssPrivateKey.PublicKey, overlayEthAddress, logger, transactionService, batchStore, o.GatewayMode, hopNodeMode, o.ChequebookEnable, o.SwapEnable, o.CORSAllowedOrigins)
-		apiService.MountTechnicalDebug()
-
-		apiServer := &http.Server{
-			IdleTimeout:       30 * time.Second,
-			ReadHeaderTimeout: 3 * time.Second,
-			Handler:           apiService,
-			ErrorLog:          log.New(b.errorLogWriter, "", 0),
-		}
-
-		apiListener, err := net.Listen("tcp", o.APIAddr)
-		if err != nil {
-			return nil, fmt.Errorf("api listener: %w", err)
-		}
-
-		go func() {
-			logger.Infof("single debug & api address: %s", apiListener.Addr())
-
-			if err := apiServer.Serve(apiListener); err != nil && err != http.ErrServerClosed {
-				logger.Debugf("single debug & api server: %v", err)
-				logger.Error("unable to serve debug & api")
-			}
-		}()
-
-		b.apiServer = apiServer
-		b.apiCloser = apiServer
 	}
 
 	// Sync the with the given Ethereum backend:
@@ -463,14 +411,9 @@ func New(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, sign
 	}
 
 	swarmAddress, err := crypto.NewOverlayAddress(*pubKey, networkID, blockHash)
+
+	err = CheckOverlayWithStore(swarmAddress, stateStore)
 	if err != nil {
-		return nil, fmt.Errorf("compute overlay address: %w", err)
-	}
-	logger.Infof("using overlay address %s", swarmAddress)
-
-	apiService.SetSwarmAddress(&swarmAddress)
-
-	if err = CheckOverlayWithStore(swarmAddress, stateStore); err != nil {
 		return nil, err
 	}
 
@@ -541,7 +484,7 @@ func New(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, sign
 			stateStore,
 			signer,
 			networkID,
-			logging.New(io.Discard, 0),
+			logger,
 			libp2pPrivateKey,
 			o,
 		)
@@ -563,11 +506,19 @@ func New(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, sign
 	if err != nil {
 		return nil, fmt.Errorf("p2p service: %w", err)
 	}
-
-	apiService.SetP2P(p2ps)
-
 	b.p2pService = p2ps
 	b.p2pHalter = p2ps
+
+	var unreserveFn func([]byte, uint8) (uint64, error)
+	var evictFn = func(b []byte) error {
+		_, err := unreserveFn(b, swarm.MaxPO+1)
+		return err
+	}
+
+	batchStore, err := batchstore.New(stateStore, evictFn, logger)
+	if err != nil {
+		return nil, fmt.Errorf("batchstore: %w", err)
+	}
 
 	// localstore depends on batchstore
 	var path string
@@ -622,7 +573,7 @@ func New(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, sign
 		postageSyncStart = startBlock
 	}
 
-	eventListener = listener.New(b.syncingStopped, logger, chainBackend, postageContractAddress, o.BlockTime, postageSyncingStallingTimeout, postageSyncingBackoffTimeout)
+	eventListener = listener.New(logger, chainBackend, postageContractAddress, o.BlockTime, &pidKiller{node: b}, postageSyncingStallingTimeout, postageSyncingBackoffTimeout)
 	b.listenerCloser = eventListener
 
 	batchSvc, err = batchservice.New(stateStore, batchStore, logger, eventListener, overlayEthAddress.Bytes(), post, sha3.New256, o.Resync)
@@ -684,7 +635,7 @@ func New(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, sign
 	}
 
 	kad, err := kademlia.New(swarmAddress, addressbook, hive, p2ps, pingPong, metricsDB, logger,
-		kademlia.Options{Bootnodes: bootnodes, BootnodeMode: o.BootnodeMode, StaticNodes: o.StaticNodes, IgnoreRadius: !chainEnabled})
+		kademlia.Options{Bootnodes: bootnodes, BootnodeMode: o.BootnodeMode, StaticNodes: o.StaticNodes})
 	if err != nil {
 		return nil, fmt.Errorf("unable to create kademlia: %w", err)
 	}
@@ -706,14 +657,8 @@ func New(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, sign
 		// interrupts at this stage of the application lifecycle. some changes
 		// would be needed on the cmd level to support context cancellation at
 		// this stage
-		select {
-		case err = <-syncedChan:
-			if err != nil {
-				return nil, err
-			}
-		case <-interrupt:
-			return nil, ErrInterruped
-		}
+		<-syncedChan
+
 	}
 
 	pricer := pricer.NewFixedPricer(swarmAddress, basePrice)
@@ -850,7 +795,6 @@ func New(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, sign
 	multiResolver := multiresolver.NewMultiResolver(
 		multiresolver.WithConnectionConfigs(o.ResolverConnectionCfgs),
 		multiresolver.WithLogger(o.Logger),
-		multiresolver.WithDefaultCIDResolver(),
 	)
 	b.resolverCloser = multiResolver
 	var chainSyncer *chainsyncer.ChainSyncer
@@ -870,137 +814,110 @@ func New(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, sign
 
 		b.chainSyncerCloser = chainSyncer
 	}
-
-	feedFactory := factory.New(ns)
-	steward := steward.New(storer, traversalService, retrieve, pushSyncProtocol)
-
-	extraOpts := api.ExtraOptions{
-		Pingpong:         pingPong,
-		TopologyDriver:   kad,
-		LightNodes:       lightNodes,
-		Accounting:       acc,
-		Pseudosettle:     pseudosettleService,
-		Swap:             swapService,
-		Chequebook:       chequebookService,
-		BlockTime:        big.NewInt(int64(o.BlockTime)),
-		Tags:             tagService,
-		Storer:           ns,
-		Resolver:         multiResolver,
-		Pss:              pssService,
-		TraversalService: traversalService,
-		Pinning:          pinningService,
-		FeedFactory:      feedFactory,
-		Post:             post,
-		PostageContract:  postageContractService,
-		Steward:          steward,
-	}
-
+	var apiService api.Service
 	if o.APIAddr != "" {
-		if apiService == nil {
-			apiService = api.New(*publicKey, pssPrivateKey.PublicKey, overlayEthAddress, logger, transactionService, batchStore, o.GatewayMode, hopNodeMode, o.ChequebookEnable, o.SwapEnable, o.CORSAllowedOrigins)
-		}
-
-		chunkC := apiService.Configure(signer, authenticator, tracer, api.Options{
+		// API server
+		var chunkC <-chan *pusher.Op
+		feedFactory := factory.New(ns)
+		steward := steward.New(storer, traversalService, retrieve, pushSyncProtocol)
+		apiService, chunkC = api.New(tagService, ns, multiResolver, pssService, traversalService, pinningService, feedFactory, post, postageContractService, steward, signer, authenticator, logger, tracer, api.Options{
 			CORSAllowedOrigins: o.CORSAllowedOrigins,
 			GatewayMode:        o.GatewayMode,
 			WsPingPeriod:       60 * time.Second,
 			Restricted:         o.Restricted,
-		}, extraOpts, chainID, chainBackend, erc20Service)
-
+		})
 		pusherService.AddFeed(chunkC)
-
-		apiService.MountAPI()
-
-		if !o.Restricted {
-			apiServer := &http.Server{
-				IdleTimeout:       30 * time.Second,
-				ReadHeaderTimeout: 3 * time.Second,
-				Handler:           apiService,
-				ErrorLog:          log.New(b.errorLogWriter, "", 0),
-			}
-
-			apiListener, err := net.Listen("tcp", o.APIAddr)
-			if err != nil {
-				return nil, fmt.Errorf("api listener: %w", err)
-			}
-
-			go func() {
-				logger.Infof("api address: %s", apiListener.Addr())
-				if err := apiServer.Serve(apiListener); err != nil && err != http.ErrServerClosed {
-					logger.Debugf("api server: %v", err)
-					logger.Error("unable to serve api")
-				}
-			}()
-
-			b.apiServer = apiServer
-			b.apiCloser = apiService
-		} else {
-			// in Restricted mode we mount debug endpoints
-			apiService.MountDebug(o.Restricted)
+		apiListener, err := net.Listen("tcp", o.APIAddr)
+		if err != nil {
+			return nil, fmt.Errorf("api listener: %w", err)
 		}
+
+		apiServer := &http.Server{
+			IdleTimeout:       30 * time.Second,
+			ReadHeaderTimeout: 3 * time.Second,
+			Handler:           apiService,
+			ErrorLog:          log.New(b.errorLogWriter, "", 0),
+		}
+
+		go func() {
+			logger.Infof("api address: %s", apiListener.Addr())
+
+			if err := apiServer.Serve(apiListener); err != nil && err != http.ErrServerClosed {
+				logger.Debugf("api server: %v", err)
+				logger.Error("unable to serve api")
+			}
+		}()
+
+		b.apiServer = apiServer
+		b.apiCloser = apiService
 	}
 
-	if o.DebugAPIAddr != "" {
+	if debugAPIService != nil {
 		// register metrics from components
-		debugService.MustRegisterMetrics(p2ps.Metrics()...)
-		debugService.MustRegisterMetrics(pingPong.Metrics()...)
-		debugService.MustRegisterMetrics(acc.Metrics()...)
-		debugService.MustRegisterMetrics(storer.Metrics()...)
-		debugService.MustRegisterMetrics(kad.Metrics()...)
+		debugAPIService.MustRegisterMetrics(p2ps.Metrics()...)
+		debugAPIService.MustRegisterMetrics(pingPong.Metrics()...)
+		debugAPIService.MustRegisterMetrics(acc.Metrics()...)
+		debugAPIService.MustRegisterMetrics(storer.Metrics()...)
+		debugAPIService.MustRegisterMetrics(kad.Metrics()...)
 
 		if pullerService != nil {
-			debugService.MustRegisterMetrics(pullerService.Metrics()...)
+			debugAPIService.MustRegisterMetrics(pullerService.Metrics()...)
 		}
 
-		debugService.MustRegisterMetrics(pushSyncProtocol.Metrics()...)
-		debugService.MustRegisterMetrics(pusherService.Metrics()...)
-		debugService.MustRegisterMetrics(pullSyncProtocol.Metrics()...)
-		debugService.MustRegisterMetrics(pullStorage.Metrics()...)
-		debugService.MustRegisterMetrics(retrieve.Metrics()...)
-		debugService.MustRegisterMetrics(lightNodes.Metrics()...)
-		debugService.MustRegisterMetrics(hive.Metrics()...)
+		debugAPIService.MustRegisterMetrics(pushSyncProtocol.Metrics()...)
+		debugAPIService.MustRegisterMetrics(pusherService.Metrics()...)
+		debugAPIService.MustRegisterMetrics(pullSyncProtocol.Metrics()...)
+		debugAPIService.MustRegisterMetrics(pullStorage.Metrics()...)
+		debugAPIService.MustRegisterMetrics(retrieve.Metrics()...)
+		debugAPIService.MustRegisterMetrics(lightNodes.Metrics()...)
+		debugAPIService.MustRegisterMetrics(hive.Metrics()...)
 
 		if bs, ok := batchStore.(metrics.Collector); ok {
-			debugService.MustRegisterMetrics(bs.Metrics()...)
+			debugAPIService.MustRegisterMetrics(bs.Metrics()...)
 		}
+
 		if eventListener != nil {
 			if ls, ok := eventListener.(metrics.Collector); ok {
-				debugService.MustRegisterMetrics(ls.Metrics()...)
+				debugAPIService.MustRegisterMetrics(ls.Metrics()...)
 			}
 		}
+
 		if pssServiceMetrics, ok := pssService.(metrics.Collector); ok {
-			debugService.MustRegisterMetrics(pssServiceMetrics.Metrics()...)
+			debugAPIService.MustRegisterMetrics(pssServiceMetrics.Metrics()...)
 		}
+
 		if swapBackendMetrics, ok := chainBackend.(metrics.Collector); ok {
-			debugService.MustRegisterMetrics(swapBackendMetrics.Metrics()...)
+			debugAPIService.MustRegisterMetrics(swapBackendMetrics.Metrics()...)
 		}
+
 		if apiService != nil {
-			debugService.MustRegisterMetrics(apiService.Metrics()...)
+			debugAPIService.MustRegisterMetrics(apiService.Metrics()...)
 		}
 		if l, ok := logger.(metrics.Collector); ok {
-			debugService.MustRegisterMetrics(l.Metrics()...)
+			debugAPIService.MustRegisterMetrics(l.Metrics()...)
 		}
+
 		if nsMetrics, ok := ns.(metrics.Collector); ok {
-			debugService.MustRegisterMetrics(nsMetrics.Metrics()...)
+			debugAPIService.MustRegisterMetrics(nsMetrics.Metrics()...)
 		}
-		debugService.MustRegisterMetrics(pseudosettleService.Metrics()...)
+
+		debugAPIService.MustRegisterMetrics(pseudosettleService.Metrics()...)
+
 		if swapService != nil {
-			debugService.MustRegisterMetrics(swapService.Metrics()...)
+			debugAPIService.MustRegisterMetrics(swapService.Metrics()...)
 		}
 		if chainSyncer != nil {
-			debugService.MustRegisterMetrics(chainSyncer.Metrics()...)
+			debugAPIService.MustRegisterMetrics(chainSyncer.Metrics()...)
 		}
 
-		debugService.Configure(signer, authenticator, tracer, api.Options{
-			CORSAllowedOrigins: o.CORSAllowedOrigins,
-			GatewayMode:        o.GatewayMode,
-			WsPingPeriod:       60 * time.Second,
-			Restricted:         o.Restricted,
-		}, extraOpts, chainID, chainBackend, erc20Service)
+		var debugSwapService swap.Interface = swapService
 
-		debugService.SetP2P(p2ps)
-		debugService.SetSwarmAddress(&swarmAddress)
-		debugService.MountDebug(false)
+		if !chainEnabled {
+			debugSwapService = new(swap.NoOpSwap)
+		}
+
+		// inject dependencies and configure full debug api http path routes
+		debugAPIService.Configure(swarmAddress, p2ps, pingPong, kad, lightNodes, storer, tagService, acc, pseudosettleService, o.SwapEnable, o.ChequebookEnable, debugSwapService, chequebookService, batchStore, post, postageContractService, traversalService, erc20Service)
 	}
 
 	if err := kad.Start(p2pCtx); err != nil {
@@ -1014,11 +931,7 @@ func New(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, sign
 	return b, nil
 }
 
-func (b *Node) SyncingStopped() chan struct{} {
-	return b.syncingStopped
-}
-
-func (b *Node) Shutdown() error {
+func (b *Node) Shutdown(ctx context.Context) error {
 	var mErr error
 
 	// if a shutdown is already in process, return here
@@ -1053,9 +966,6 @@ func (b *Node) Shutdown() error {
 	}
 
 	tryClose(b.apiCloser, "api")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
 
 	var eg errgroup.Group
 	if b.apiServer != nil {
@@ -1150,10 +1060,33 @@ func (b *Node) Shutdown() error {
 	return mErr
 }
 
+// pidKiller is used to issue a forced shut down of the node from sub modules. The issue with using the
+// node's Shutdown method is that it only shuts down the node and does not exit the start process
+// which is waiting on the os.Signals. This is not desirable, but currently hop node cannot handle
+// rate-limiting blockchain API calls properly. We will shut down the node in this case to allow the
+// user to rectify the API issues (by adjusting limits or using a different one). There is no platform
+// agnostic way to trigger os.Signals in go unfortunately. Which is why we will use the process.Kill
+// approach which works on windows as well.
+type pidKiller struct {
+	node *Node
+}
+
 var ErrShutdownInProgress error = errors.New("shutdown in progress")
 
-func isChainEnabled(o *Options, swapEndpoint string, logger logging.Logger) bool {
-	chainDisabled := swapEndpoint == ""
+func (p *pidKiller) Shutdown(ctx context.Context) error {
+	err := p.node.Shutdown(ctx)
+	if err != nil {
+		return err
+	}
+	ps, err := os.FindProcess(syscall.Getpid())
+	if err != nil {
+		return err
+	}
+	return ps.Kill()
+}
+
+func isChainEnabled(o *Options, logger logging.Logger) bool {
+	chainDisabled := !o.ChainEnable
 	lightMode := !o.FullNodeMode
 
 	if lightMode && chainDisabled { // ultra light mode is LightNode mode with chain disabled

@@ -30,7 +30,7 @@ import (
 	"github.com/redesblock/hop/core/tracing"
 )
 
-func (s *Service) hopUploadHandler(w http.ResponseWriter, r *http.Request) {
+func (s *server) hopUploadHandler(w http.ResponseWriter, r *http.Request) {
 	logger := tracing.NewLoggerWithTraceID(r.Context(), s.logger)
 
 	contentType := r.Header.Get(contentTypeHeader)
@@ -72,7 +72,7 @@ type hopUploadResponse struct {
 
 // fileUploadHandler uploads the file and its metadata supplied in the file body and
 // the headers
-func (s *Service) fileUploadHandler(w http.ResponseWriter, r *http.Request, storer storage.Storer, waitFn func() error) {
+func (s *server) fileUploadHandler(w http.ResponseWriter, r *http.Request, storer storage.Storer, waitFn func() error) {
 	logger := tracing.NewLoggerWithTraceID(r.Context(), s.logger)
 	var (
 		reader   io.Reader
@@ -233,8 +233,12 @@ func (s *Service) fileUploadHandler(w http.ResponseWriter, r *http.Request, stor
 	})
 }
 
-func (s *Service) hopDownloadHandler(w http.ResponseWriter, r *http.Request) {
+func (s *server) hopDownloadHandler(w http.ResponseWriter, r *http.Request) {
 	logger := tracing.NewLoggerWithTraceID(r.Context(), s.logger)
+	ls := loadsave.NewReadonly(s.storer)
+	feedDereferenced := false
+
+	ctx := r.Context()
 
 	nameOrHex := mux.Vars(r)["address"]
 	pathVar := mux.Vars(r)["path"]
@@ -251,16 +255,6 @@ func (s *Service) hopDownloadHandler(w http.ResponseWriter, r *http.Request) {
 		jsonhttp.NotFound(w, nil)
 		return
 	}
-
-	s.serveReference(address, pathVar, w, r)
-}
-
-func (s *Service) serveReference(address swarm.Address, pathVar string, w http.ResponseWriter, r *http.Request) {
-	logger := tracing.NewLoggerWithTraceID(r.Context(), s.logger)
-	ls := loadsave.NewReadonly(s.storer)
-	feedDereferenced := false
-
-	ctx := r.Context()
 
 FETCH:
 	// read manifest entry
@@ -403,7 +397,7 @@ FETCH:
 	s.serveManifestEntry(w, r, address, me, !feedDereferenced)
 }
 
-func (s *Service) serveManifestEntry(
+func (s *server) serveManifestEntry(
 	w http.ResponseWriter,
 	r *http.Request,
 	address swarm.Address,
@@ -425,7 +419,7 @@ func (s *Service) serveManifestEntry(
 }
 
 // downloadHandler contains common logic for dowloading Swarm file from API
-func (s *Service) downloadHandler(w http.ResponseWriter, r *http.Request, reference swarm.Address, additionalHeaders http.Header, etag bool) {
+func (s *server) downloadHandler(w http.ResponseWriter, r *http.Request, reference swarm.Address, additionalHeaders http.Header, etag bool) {
 	logger := tracing.NewLoggerWithTraceID(r.Context(), s.logger)
 
 	reader, l, err := joiner.New(r.Context(), s.storer, reference)
@@ -476,7 +470,7 @@ func manifestMetadataLoad(
 	return "", false
 }
 
-func (s *Service) manifestFeed(
+func (s *server) manifestFeed(
 	ctx context.Context,
 	m manifest.Interface,
 ) (feeds.Lookup, error) {
@@ -515,7 +509,7 @@ func (s *Service) manifestFeed(
 }
 
 // hopPatchHandler endpoint has been deprecated; use stewardship endpoint instead.
-func (s *Service) hopPatchHandler(w http.ResponseWriter, r *http.Request) {
+func (s *server) hopPatchHandler(w http.ResponseWriter, r *http.Request) {
 	nameOrHex := mux.Vars(r)["address"]
 	address, err := s.resolveNameOrAddress(nameOrHex)
 	if err != nil {

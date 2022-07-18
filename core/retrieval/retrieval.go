@@ -19,7 +19,6 @@ import (
 	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/pricer"
 	pb "github.com/redesblock/hop/core/retrieval/pb"
-	"github.com/redesblock/hop/core/skippeers"
 	"github.com/redesblock/hop/core/soc"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
@@ -117,7 +116,7 @@ func (s *Service) RetrieveChunk(ctx context.Context, addr swarm.Address, origin 
 			maxPeers = maxSelects
 		}
 
-		sp := new(skippeers.List)
+		sp := newSkipPeers()
 
 		ticker := time.NewTicker(retrieveRetryIntervalDuration)
 		defer ticker.Stop()
@@ -176,7 +175,7 @@ func (s *Service) RetrieveChunk(ctx context.Context, addr swarm.Address, origin 
 				// break
 			case res := <-resultC:
 				if errors.Is(res.err, topology.ErrNotFound) {
-					if sp.OverdraftListEmpty() {
+					if sp.Saturated() {
 						// if no peer is available, and none skipped temporarily
 						s.logger.Tracef("retrieval: failed to get chunk %s", addr)
 						return nil, storage.ErrNotFound
@@ -220,7 +219,7 @@ func (s *Service) RetrieveChunk(ctx context.Context, addr swarm.Address, origin 
 				if timeNow > lastTime {
 					lastTime = timeNow
 					peerAttempt = 0
-					sp.ResetOverdraft()
+					sp.Reset()
 				} else {
 					select {
 					case <-time.After(600 * time.Millisecond):
@@ -244,7 +243,7 @@ func (s *Service) RetrieveChunk(ctx context.Context, addr swarm.Address, origin 
 	return v.(swarm.Chunk), nil
 }
 
-func (s *Service) retrieveChunk(ctx context.Context, addr swarm.Address, sp *skippeers.List, originated bool) (chunk swarm.Chunk, peer swarm.Address, requested bool, err error) {
+func (s *Service) retrieveChunk(ctx context.Context, addr swarm.Address, sp *skipPeers, originated bool) (chunk swarm.Chunk, peer swarm.Address, requested bool, err error) {
 	startTimer := time.Now()
 	v := ctx.Value(requestSourceContextKey{})
 	// allow upstream requests if this node is the source of the request
@@ -271,11 +270,8 @@ func (s *Service) retrieveChunk(ctx context.Context, addr swarm.Address, sp *ski
 	// compute the peer's price for this chunk for price header
 	chunkPrice := s.pricer.PeerPrice(peer, addr)
 
-	creditCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-
 	// Reserve to see whether we can request the chunk
-	creditAction, err := s.accounting.PrepareCredit(creditCtx, peer, chunkPrice, originated)
+	creditAction, err := s.accounting.PrepareCredit(peer, chunkPrice, originated)
 	if err != nil {
 		sp.AddOverdraft(peer)
 		return nil, peer, false, err
@@ -431,7 +427,7 @@ func (s *Service) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (e
 	}
 
 	chunkPrice := s.pricer.Price(chunk.Address())
-	debit, err := s.accounting.PrepareDebit(ctx, p.Address, chunkPrice)
+	debit, err := s.accounting.PrepareDebit(p.Address, chunkPrice)
 	if err != nil {
 		return fmt.Errorf("prepare debit to peer %s before writeback: %w", p.Address.String(), err)
 	}

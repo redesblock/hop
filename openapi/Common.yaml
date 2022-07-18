@@ -372,10 +372,10 @@ components:
           type: string
           enum: [light, full, dev]
           description: >
-            Gives back in what mode the Bee client has been started. The modes are mutually exclusive
+            Gives back in what mode the hop client has been started. The modes are mutually exclusive
             * `light` - light node; does not participate in forwarding or storing chunks
             * `full` - full node
-            * `dev` - development mode; Bee client for development purposes, blockchain operations are mocked
+            * `dev` - development mode; hop client for development purposes, blockchain operations are mocked
         gatewayMode:
           type: boolean
         chequebookEnabled:
@@ -393,11 +393,11 @@ components:
         apiVersion:
           type: string
           default: "0.0.0"
-          description: The default value is set in case the bee binary was not build correctly.
+          description: The default value is set in case the hop binary was not build correctly.
         debugApiVersion:
           type: string
           default: "0.0.0"
-          description: The default value is set in case the bee binary was not build correctly.
+          description: The default value is set in case the hop binary was not build correctly.
 
     PostageBatch:
       type: object
@@ -407,7 +407,7 @@ components:
         utilization:
           type: integer
         usable:
-          description: Indicate that the batch was discovered by the Bee node, but it awaits enough on-chain confirmations before declaring the batch as usable.
+          description: Indicate that the batch was discovered by the hop node, but it awaits enough on-chain confirmations before declaring the batch as usable.
           type: boolean
         label:
           type: string

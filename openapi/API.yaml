@@ -16,18 +16,18 @@ servers:
     variables:
       apiRoot:
         default: "localhost"
-        description: Base address of the local bee node main API
+        description: Base address of the local hop node main API
       port:
         default: "1633"
-        description: Service port provided in bee node config
+        description: Service port provided in hop node config
   - url: "http://{apiRoot}:{port}"
     variables:
       apiRoot:
         default: "localhost"
-        description: Base address of the local bee node main API
+        description: Base address of the local hop node main API
       port:
         default: "1633"
-        description: Service port provided in bee node config
+        description: Service port provided in hop node config
 
 paths:
   "/auth":
