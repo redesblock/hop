@@ -14,7 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/hashicorp/go-multierror"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/redesblock/hop/core/accounting"
+	"github.com/redesblock/hop/core/account"
 	"github.com/redesblock/hop/core/addressbook"
 	"github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/feeds"
@@ -146,7 +146,7 @@ func bootstrapNode(
 		return nil, fmt.Errorf("pricing service: %w", err)
 	}
 
-	acc, err := accounting.NewAccounting(
+	acc, err := account.NewAccounting(
 		paymentThreshold,
 		o.PaymentTolerance,
 		o.PaymentEarly,
@@ -157,7 +157,7 @@ func bootstrapNode(
 		p2ps,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("accounting: %w", err)
+		return nil, fmt.Errorf("account: %w", err)
 	}
 	b.accountingCloser = acc
 

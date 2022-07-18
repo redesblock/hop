@@ -48,7 +48,7 @@ func TestEmitCheques(t *testing.T) {
 	swappInitiator.SetSwap(swapInitiator)
 	peer := p2p.Peer{Address: peerID}
 
-	// amount in accounting credits cheque should cover
+	// amount in account credits cheque should cover
 	chequeAmount := big.NewInt(1250)
 
 	issueFunc := func(ctx context.Context, beneficiary common.Address, amount *big.Int, sendChequeFunc chequebook.SendChequeFunc) (*big.Int, error) {

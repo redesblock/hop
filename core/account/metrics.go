@@ -1,4 +1,4 @@
-package accounting
+package account
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
@@ -34,7 +34,7 @@ type metrics struct {
 }
 
 func newMetrics() metrics {
-	subsystem := "accounting"
+	subsystem := "account"
 
 	return metrics{
 		TotalDebitedAmount: prometheus.NewCounter(prometheus.CounterOpts{
@@ -173,7 +173,7 @@ func newMetrics() metrics {
 	}
 }
 
-// Metrics returns the prometheus Collector for the accounting service.
+// Metrics returns the prometheus Collector for the account service.
 func (a *Accounting) Metrics() []prometheus.Collector {
 	return m.PrometheusCollectorsFromFields(a.metrics)
 }

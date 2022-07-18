@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	accountingmock "github.com/redesblock/hop/core/accounting/mock"
+	accountingmock "github.com/redesblock/hop/core/account/mock"
 
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"

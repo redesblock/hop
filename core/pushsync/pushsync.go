@@ -14,7 +14,7 @@ import (
 	"time"
 
 	opentracing "github.com/opentracing/opentracing-go"
-	"github.com/redesblock/hop/core/accounting"
+	"github.com/redesblock/hop/core/account"
 	"github.com/redesblock/hop/core/cac"
 	"github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/logging"
@@ -78,7 +78,7 @@ type PushSync struct {
 	tagger          *tags.Tags
 	unwrap          func(swarm.Chunk)
 	logger          logging.Logger
-	accounting      accounting.Interface
+	accounting      account.Interface
 	pricer          pricer.Interface
 	metrics         metrics
 	tracer          *tracing.Tracer
@@ -99,7 +99,7 @@ type receiptResult struct {
 	err      error
 }
 
-func New(address swarm.Address, blockHash []byte, streamer p2p.StreamerDisconnecter, storer storage.Putter, topology topology.Driver, tagger *tags.Tags, isFullNode bool, unwrap func(swarm.Chunk), validStamp postage.ValidStampFn, logger logging.Logger, accounting accounting.Interface, pricer pricer.Interface, signer crypto.Signer, tracer *tracing.Tracer, warmupTime time.Duration, networkID uint64, receiptEndPoint string) *PushSync {
+func New(address swarm.Address, blockHash []byte, streamer p2p.StreamerDisconnecter, storer storage.Putter, topology topology.Driver, tagger *tags.Tags, isFullNode bool, unwrap func(swarm.Chunk), validStamp postage.ValidStampFn, logger logging.Logger, accounting account.Interface, pricer pricer.Interface, signer crypto.Signer, tracer *tracing.Tracer, warmupTime time.Duration, networkID uint64, receiptEndPoint string) *PushSync {
 	ps := &PushSync{
 		address:         address,
 		blockHash:       blockHash,
@@ -531,7 +531,7 @@ func (ps *PushSync) pushPeer(ctx context.Context, resultChan chan<- receiptResul
 	// Reserve to see whether we can make the request
 	creditAction, err := ps.accounting.PrepareCredit(creditCtx, peer, receiptPrice, origin)
 	if err != nil {
-		if errors.Is(err, accounting.ErrOverdraft) || errors.Is(err, accounting.ErrFailToLock) {
+		if errors.Is(err, account.ErrOverdraft) || errors.Is(err, account.ErrFailToLock) {
 			err = fmt.Errorf("pushsync: prepare credit: %v: %w", err, errNotAttempted)
 			return
 		}

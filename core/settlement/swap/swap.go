@@ -21,7 +21,7 @@ var (
 	ErrWrongChequebook = errors.New("wrong chequebook")
 	// ErrUnknownBeneficary is the error if a peer has never announced a beneficiary.
 	ErrUnknownBeneficary = errors.New("unknown beneficiary for peer")
-	// ErrChequeValueTooLow is the error a peer issued a cheque not covering 1 accounting credit
+	// ErrChequeValueTooLow is the error a peer issued a cheque not covering 1 account credit
 	ErrChequeValueTooLow = errors.New("cheque value too low")
 	ErrNoChequebook      = errors.New("no chequebook")
 )

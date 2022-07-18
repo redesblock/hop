@@ -299,7 +299,7 @@ func deleteKeys(s *Store, keys []string) error {
 func (s *Store) Nuke(forgetStamps bool) error {
 	var (
 		keys               []string
-		prefixesToPreserve = []string{"accounting", "pseudosettle", "swap", "non-mineable-overlay"}
+		prefixesToPreserve = []string{"account", "pseudosettle", "swap", "non-mineable-overlay"}
 		err                error
 	)
 

@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/redesblock/hop/core/accounting"
-	"github.com/redesblock/hop/core/accounting/mock"
+	"github.com/redesblock/hop/core/account"
+	"github.com/redesblock/hop/core/account/mock"
 	"github.com/redesblock/hop/core/api"
 	"github.com/redesblock/hop/core/bigint"
 	"github.com/redesblock/hop/core/jsonhttp"
@@ -116,7 +116,7 @@ func TestBalancesPeersError(t *testing.T) {
 func TestBalancesPeersNoBalance(t *testing.T) {
 	peer := "bff2c89e85e78c38bd89fca1acc996afb876c21bf5a8482ad798ce15f1c223fa"
 	compensatedBalanceFunc := func(swarm.Address) (*big.Int, error) {
-		return nil, accounting.ErrPeerNoBalance
+		return nil, account.ErrPeerNoBalance
 	}
 	testServer, _, _, _ := newTestServer(t, testServerOptions{
 		DebugAPI:       true,
@@ -274,7 +274,7 @@ func TestConsumedPeersError(t *testing.T) {
 func TestConsumedPeersNoBalance(t *testing.T) {
 	peer := "bff2c89e85e78c38bd89fca1acc996afb876c21bf5a8482ad798ce15f1c223fa"
 	balanceFunc := func(swarm.Address) (*big.Int, error) {
-		return nil, accounting.ErrPeerNoBalance
+		return nil, account.ErrPeerNoBalance
 	}
 	testServer, _, _, _ := newTestServer(t, testServerOptions{
 		DebugAPI:       true,

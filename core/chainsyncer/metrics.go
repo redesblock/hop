@@ -57,7 +57,7 @@ func newMetrics() metrics {
 	}
 }
 
-// Metrics returns the prometheus Collector for the accounting service.
+// Metrics returns the prometheus Collector for the account service.
 func (c *ChainSyncer) Metrics() []prometheus.Collector {
 	return m.PrometheusCollectorsFromFields(c.metrics)
 }

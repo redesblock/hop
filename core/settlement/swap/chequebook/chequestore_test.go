@@ -442,7 +442,7 @@ func TestReceiveChequeNotEnoughValueAfterDeduction(t *testing.T) {
 	chainID := int64(1)
 
 	// cheque needs to cover initial deduction (if applicable) plus one times the exchange rate
-	// in order to amount to at least 1 accounting credit and be accepted
+	// in order to amount to at least 1 account credit and be accepted
 	// in this test cheque amount is just not enough to cover that therefore we expect
 
 	exchangeRate := big.NewInt(100)

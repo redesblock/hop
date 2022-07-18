@@ -23,7 +23,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/hashicorp/go-multierror"
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/redesblock/hop/core/accounting"
+	"github.com/redesblock/hop/core/account"
 	"github.com/redesblock/hop/core/addressbook"
 	"github.com/redesblock/hop/core/api"
 	"github.com/redesblock/hop/core/auth"
@@ -733,7 +733,7 @@ func New(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, sign
 		logger.Debugf("p2p address: %s", addr)
 	}
 
-	acc, err := accounting.NewAccounting(
+	acc, err := account.NewAccounting(
 		paymentThreshold,
 		o.PaymentTolerance,
 		o.PaymentEarly,
@@ -744,7 +744,7 @@ func New(interrupt chan os.Signal, addr string, publicKey *ecdsa.PublicKey, sign
 		p2ps,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("accounting: %w", err)
+		return nil, fmt.Errorf("account: %w", err)
 	}
 	b.accountingCloser = acc
 
@@ -1099,7 +1099,7 @@ func (b *Node) Shutdown() error {
 	}()
 	go func() {
 		defer wg.Done()
-		tryClose(b.accountingCloser, "accounting")
+		tryClose(b.accountingCloser, "account")
 	}()
 
 	b.p2pCancel()

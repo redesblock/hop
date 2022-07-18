@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/opentracing/opentracing-go"
-	"github.com/redesblock/hop/core/accounting"
+	"github.com/redesblock/hop/core/account"
 	"github.com/redesblock/hop/core/cac"
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
@@ -56,7 +56,7 @@ type Service struct {
 	storer        storage.Storer
 	singleflight  singleflight.Group
 	logger        logging.Logger
-	accounting    accounting.Interface
+	accounting    account.Interface
 	metrics       metrics
 	pricer        pricer.Interface
 	tracer        *tracing.Tracer
@@ -64,7 +64,7 @@ type Service struct {
 	validStamp    postage.ValidStampFn
 }
 
-func New(addr swarm.Address, storer storage.Storer, streamer p2p.Streamer, chunkPeerer topology.EachPeerer, logger logging.Logger, accounting accounting.Interface, pricer pricer.Interface, tracer *tracing.Tracer, forwarderCaching bool, validStamp postage.ValidStampFn) *Service {
+func New(addr swarm.Address, storer storage.Storer, streamer p2p.Streamer, chunkPeerer topology.EachPeerer, logger logging.Logger, accounting account.Interface, pricer pricer.Interface, tracer *tracing.Tracer, forwarderCaching bool, validStamp postage.ValidStampFn) *Service {
 	return &Service{
 		addr:          addr,
 		streamer:      streamer,

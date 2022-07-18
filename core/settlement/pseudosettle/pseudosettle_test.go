@@ -129,7 +129,7 @@ func testCaseAccepted(t *testing.T, recorder *streamtest.Recorder, observer *tes
 	payer.SetTime(payerTime)
 	recipient.SetTime(recipientTime)
 
-	// set debt shown by accounting (observer)
+	// set debt shown by account (observer)
 	observer.setPeerDebt(peerID, debtAmount)
 
 	acceptedAmount, _, err := payer.Pay(context.Background(), peerID, amount, amount)

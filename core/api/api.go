@@ -23,7 +23,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/redesblock/hop/core/accounting"
+	"github.com/redesblock/hop/core/account"
 	"github.com/redesblock/hop/core/auth"
 	"github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/feeds"
@@ -144,7 +144,7 @@ type Service struct {
 
 	topologyDriver topology.Driver
 	p2p            p2p.DebugService
-	accounting     accounting.Interface
+	accounting     account.Interface
 	chequebook     chequebook.Service
 	pseudosettle   settlement.Interface
 	pingpong       pingpong.Interface
@@ -188,7 +188,7 @@ type ExtraOptions struct {
 	Pingpong         pingpong.Interface
 	TopologyDriver   topology.Driver
 	LightNodes       *lightnode.Container
-	Accounting       accounting.Interface
+	Accounting       account.Interface
 	Pseudosettle     settlement.Interface
 	Swap             swap.Interface
 	Chequebook       chequebook.Service

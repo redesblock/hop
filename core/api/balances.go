@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"github.com/redesblock/hop/core/accounting"
+	"github.com/redesblock/hop/core/account"
 	"github.com/redesblock/hop/core/bigint"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/swarm"
@@ -61,7 +61,7 @@ func (s *Service) peerBalanceHandler(w http.ResponseWriter, r *http.Request) {
 
 	balance, err := s.accounting.Balance(peer)
 	if err != nil {
-		if errors.Is(err, accounting.ErrPeerNoBalance) {
+		if errors.Is(err, account.ErrPeerNoBalance) {
 			jsonhttp.NotFound(w, errNoBalance)
 			return
 		}
@@ -111,7 +111,7 @@ func (s *Service) compensatedPeerBalanceHandler(w http.ResponseWriter, r *http.R
 
 	balance, err := s.accounting.CompensatedBalance(peer)
 	if err != nil {
-		if errors.Is(err, accounting.ErrPeerNoBalance) {
+		if errors.Is(err, account.ErrPeerNoBalance) {
 			jsonhttp.NotFound(w, errNoBalance)
 			return
 		}

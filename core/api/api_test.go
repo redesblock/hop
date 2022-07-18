@@ -19,7 +19,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/gorilla/websocket"
-	accountingmock "github.com/redesblock/hop/core/accounting/mock"
+	accountingmock "github.com/redesblock/hop/core/account/mock"
 	"github.com/redesblock/hop/core/api"
 	mockauth "github.com/redesblock/hop/core/auth/mock"
 	"github.com/redesblock/hop/core/crypto"
