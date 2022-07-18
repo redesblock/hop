@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethersphere/go-price-oracle-abi/priceoracleabi"
+	hopabi "github.com/redesblock/hop/contracts/abi"
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/settlement/swap/priceoracle"
 	"github.com/redesblock/hop/core/transaction"
@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	priceOracleABI = transaction.ParseABIUnchecked(priceoracleabi.PriceOracleABIv0_1_0)
+	priceOracleABI = transaction.ParseABIUnchecked(hopabi.PriceOracleABI)
 )
 
 func TestExchangeGetPrice(t *testing.T) {

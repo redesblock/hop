@@ -9,7 +9,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethersphere/go-price-oracle-abi/priceoracleabi"
+	hopabi "github.com/redesblock/hop/contracts/abi"
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/transaction"
 )
@@ -39,7 +39,7 @@ type Service interface {
 }
 
 var (
-	priceOracleABI = transaction.ParseABIUnchecked(priceoracleabi.PriceOracleABIv0_1_0)
+	priceOracleABI = transaction.ParseABIUnchecked(hopabi.PriceOracleABI)
 )
 
 func New(logger logging.Logger, priceOracleAddress common.Address, transactionService transaction.Service, timeDivisor int64) Service {
