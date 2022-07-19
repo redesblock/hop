@@ -165,7 +165,7 @@ func (db *DB) put(ctx context.Context, mode storage.ModePut, chs ...swarm.Chunk)
 			}
 			exist[i] = exists
 			if !exists {
-				// chunk is new so, trigger subscription feeds
+				// chunk is new so, trigger subscription pns
 				// after the batch is successfully written
 				triggerPullFeed[db.po(ch.Address())] = struct{}{}
 				triggerPushFeed = true
@@ -269,7 +269,7 @@ func (db *DB) putRequest(
 		if item.Immutable {
 			return false, 0, 0, ErrOverwrite
 		}
-		// if a chunk is found with the same postage stamp index,
+		// if a chunk is found with the same voucher stamp index,
 		// replace it with the new one only if timestamp is later
 		if !later(previous, item) {
 			return false, 0, 0, nil
@@ -356,13 +356,13 @@ func (db *DB) putUpload(
 	previous, err := db.postageIndexIndex.Get(item)
 	if err != nil {
 		if !errors.Is(err, leveldb.ErrNotFound) {
-			return false, 0, fmt.Errorf("postage index get: %w", err)
+			return false, 0, fmt.Errorf("voucher index get: %w", err)
 		}
 	} else {
 		if item.Immutable {
 			return false, 0, ErrOverwrite
 		}
-		// if a chunk is found with the same postage stamp index,
+		// if a chunk is found with the same voucher stamp index,
 		// replace it with the new one only if timestamp is later
 		if !later(previous, item) {
 			return false, 0, nil
@@ -427,7 +427,7 @@ func (db *DB) putSync(batch *leveldb.Batch, loc *releaseLocations, binIDs map[ui
 		if item.Immutable {
 			return false, 0, 0, ErrOverwrite
 		}
-		// if a chunk is found with the same postage stamp index,
+		// if a chunk is found with the same voucher stamp index,
 		// replace it with the new one only if timestamp is later
 		if !later(previous, item) {
 			return false, 0, 0, nil

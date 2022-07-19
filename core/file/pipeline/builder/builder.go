@@ -66,7 +66,7 @@ func newShortEncryptionPipelineFunc(ctx context.Context, s storage.Putter, mode 
 	}
 }
 
-// FeedPipeline feeds the pipeline with the given reader until EOF is reached.
+// FeedPipeline pns the pipeline with the given reader until EOF is reached.
 // It returns the cryptographic root hash of the content.
 func FeedPipeline(ctx context.Context, pipeline pipeline.Interface, r io.Reader) (addr swarm.Address, err error) {
 	data := make([]byte, swarm.ChunkSize)

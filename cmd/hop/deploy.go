@@ -7,7 +7,7 @@ import (
 
 	"github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/node"
-	"github.com/redesblock/hop/core/settlement/swap/erc20"
+	"github.com/redesblock/hop/core/settle/swap/erc20"
 	"github.com/spf13/cobra"
 )
 

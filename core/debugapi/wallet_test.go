@@ -10,7 +10,7 @@ import (
 	"github.com/redesblock/hop/core/debugapi"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/jsonhttp/jsonhttptest"
-	erc20mock "github.com/redesblock/hop/core/settlement/swap/erc20/mock"
+	erc20mock "github.com/redesblock/hop/core/settle/swap/erc20/mock"
 	"github.com/redesblock/hop/core/transaction/backendmock"
 	"github.com/redesblock/hop/core/util/bigint"
 )

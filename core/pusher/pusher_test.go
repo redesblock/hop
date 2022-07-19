@@ -11,9 +11,9 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/redesblock/hop/core/crypto"
-	"github.com/redesblock/hop/core/postage"
 	statestore "github.com/redesblock/hop/core/statestore/mock"
 	"github.com/redesblock/hop/core/topology"
+	"github.com/redesblock/hop/core/voucher"
 
 	"github.com/redesblock/hop/core/localstore"
 	"github.com/redesblock/hop/core/logging"
@@ -443,7 +443,7 @@ func TestChunkWithInvalidStampSkipped(t *testing.T) {
 	}
 }
 
-func createPusher(t *testing.T, addr swarm.Address, pushSyncService pushsync.PushSyncer, validStamp postage.ValidStampFn, mockOpts ...mock.Option) (*tags.Tags, *pusher.Service, *Store) {
+func createPusher(t *testing.T, addr swarm.Address, pushSyncService pushsync.PushSyncer, validStamp voucher.ValidStampFn, mockOpts ...mock.Option) (*tags.Tags, *pusher.Service, *Store) {
 	t.Helper()
 	logger := logging.New(io.Discard, 0)
 	storer, err := localstore.New("", addr.Bytes(), nil, nil, logger)

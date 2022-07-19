@@ -20,7 +20,6 @@ import (
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/p2p/protobuf"
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/pricer"
 	"github.com/redesblock/hop/core/pushsync/pb"
 	"github.com/redesblock/hop/core/soc"
@@ -29,6 +28,7 @@ import (
 	"github.com/redesblock/hop/core/tags"
 	"github.com/redesblock/hop/core/topology"
 	"github.com/redesblock/hop/core/tracing"
+	"github.com/redesblock/hop/core/voucher"
 )
 
 const (
@@ -80,7 +80,7 @@ type PushSync struct {
 	pricer          pricer.Interface
 	metrics         metrics
 	tracer          *tracing.Tracer
-	validStamp      postage.ValidStampFn
+	validStamp      voucher.ValidStampFn
 	signer          crypto.Signer
 	isFullNode      bool
 	warmupPeriod    time.Time
@@ -97,7 +97,7 @@ type receiptResult struct {
 	err      error
 }
 
-func New(address swarm.Address, blockHash []byte, streamer p2p.StreamerDisconnecter, storer storage.Putter, topology topology.Driver, tagger *tags.Tags, isFullNode bool, unwrap func(swarm.Chunk), validStamp postage.ValidStampFn, logger logging.Logger, accounting account.Interface, pricer pricer.Interface, signer crypto.Signer, tracer *tracing.Tracer, warmupTime time.Duration, networkID uint64, receiptEndPoint string) *PushSync {
+func New(address swarm.Address, blockHash []byte, streamer p2p.StreamerDisconnecter, storer storage.Putter, topology topology.Driver, tagger *tags.Tags, isFullNode bool, unwrap func(swarm.Chunk), validStamp voucher.ValidStampFn, logger logging.Logger, accounting account.Interface, pricer pricer.Interface, signer crypto.Signer, tracer *tracing.Tracer, warmupTime time.Duration, networkID uint64, receiptEndPoint string) *PushSync {
 	ps := &PushSync{
 		address:         address,
 		blockHash:       blockHash,
@@ -165,7 +165,7 @@ func (ps *PushSync) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) 
 	span, _, ctx := ps.tracer.StartSpanFromContext(ctx, "pushsync-handler", ps.logger, opentracing.Tag{Key: "address", Value: chunkAddress.String()})
 	defer span.Finish()
 
-	stamp := new(postage.Stamp)
+	stamp := new(voucher.Stamp)
 	// attaching the stamp is required becase pushToClosest expects a chunk with a stamp
 	err = stamp.UnmarshalBinary(ch.Stamp)
 	if err != nil {
@@ -670,7 +670,7 @@ func (ps *PushSync) pushToNeighbour(ctx context.Context, peer swarm.Address, ch 
 	}
 }
 
-func (ps *PushSync) validStampWrapper(f postage.ValidStampFn) postage.ValidStampFn {
+func (ps *PushSync) validStampWrapper(f voucher.ValidStampFn) voucher.ValidStampFn {
 	return func(c swarm.Chunk, s []byte) (swarm.Chunk, error) {
 
 		t := time.Now()

@@ -13,11 +13,11 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/redesblock/hop/core/jsonhttp"
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/sctx"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
+	"github.com/redesblock/hop/core/voucher"
 )
 
 type chunkAddressResponse struct {
@@ -47,9 +47,9 @@ func (s *server) processUploadRequest(
 		s.logger.Debugf("chunk upload: putter: %v", err)
 		s.logger.Error("chunk upload: putter")
 		switch {
-		case errors.Is(err, postage.ErrNotFound):
+		case errors.Is(err, voucher.ErrNotFound):
 			return nil, nil, nil, nil, errors.New("batch not found")
-		case errors.Is(err, postage.ErrNotUsable):
+		case errors.Is(err, voucher.ErrNotUsable):
 			return nil, nil, nil, nil, errors.New("batch not usable")
 		}
 		return nil, nil, nil, nil, err
@@ -106,7 +106,7 @@ func (s *server) chunkUploadHandler(w http.ResponseWriter, r *http.Request) {
 		s.logger.Debugf("chunk upload: chunk write error: %v, addr %s", err, chunk.Address())
 		s.logger.Error("chunk upload: chunk write error")
 		switch {
-		case errors.Is(err, postage.ErrBucketFull):
+		case errors.Is(err, voucher.ErrBucketFull):
 			jsonhttp.PaymentRequired(w, "batch is overissued")
 		default:
 			jsonhttp.InternalServerError(w, "chunk write error")

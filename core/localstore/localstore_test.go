@@ -14,12 +14,12 @@ import (
 	"time"
 
 	"github.com/redesblock/hop/core/logging"
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/sharky"
 	"github.com/redesblock/hop/core/shed"
 	"github.com/redesblock/hop/core/storage"
 	chunktesting "github.com/redesblock/hop/core/storage/testing"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/voucher"
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
@@ -218,7 +218,7 @@ func newTestDB(t testing.TB, o *Options) *DB {
 		o = &Options{}
 	}
 	if o.UnreserveFunc == nil {
-		o.UnreserveFunc = func(postage.UnreserveIteratorFn) error {
+		o.UnreserveFunc = func(voucher.UnreserveIteratorFn) error {
 			return nil
 		}
 	}
@@ -366,7 +366,7 @@ func newPullIndexTest(db *DB, ch swarm.Chunk, binID uint64, wantError error) fun
 			t.Errorf("got error %v, want %v", err, wantError)
 		}
 		if err == nil {
-			validateItem(t, item, ch.Address().Bytes(), 0, 0, postage.NewStamp(ch.Stamp().BatchID(), nil, nil, nil))
+			validateItem(t, item, ch.Address().Bytes(), 0, 0, voucher.NewStamp(ch.Stamp().BatchID(), nil, nil, nil))
 		}
 	}
 }
@@ -385,14 +385,14 @@ func newPushIndexTest(db *DB, ch swarm.Chunk, storeTimestamp int64, wantError er
 			t.Errorf("got error %v, want %v", err, wantError)
 		}
 		if err == nil {
-			validateItem(t, item, ch.Address().Bytes(), storeTimestamp, 0, postage.NewStamp(nil, nil, nil, nil))
+			validateItem(t, item, ch.Address().Bytes(), storeTimestamp, 0, voucher.NewStamp(nil, nil, nil, nil))
 		}
 	}
 }
 
 // newGCIndexTest returns a test function that validates if the right
 // chunk values are in the GC index.
-func newGCIndexTest(db *DB, chunk swarm.Chunk, storeTimestamp, accessTimestamp int64, binID uint64, wantError error, stamp *postage.Stamp) func(t *testing.T) {
+func newGCIndexTest(db *DB, chunk swarm.Chunk, storeTimestamp, accessTimestamp int64, binID uint64, wantError error, stamp *voucher.Stamp) func(t *testing.T) {
 	return func(t *testing.T) {
 		t.Helper()
 
@@ -423,7 +423,7 @@ func newPinIndexTest(db *DB, chunk swarm.Chunk, wantError error) func(t *testing
 			t.Errorf("got error %v, want %v", err, wantError)
 		}
 		if err == nil {
-			validateItem(t, item, chunk.Address().Bytes(), 0, 0, postage.NewStamp(nil, nil, nil, nil))
+			validateItem(t, item, chunk.Address().Bytes(), 0, 0, voucher.NewStamp(nil, nil, nil, nil))
 		}
 	}
 }

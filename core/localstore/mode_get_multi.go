@@ -5,11 +5,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/sharky"
 	"github.com/redesblock/hop/core/shed"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/voucher"
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
@@ -38,7 +38,7 @@ func (db *DB) GetMulti(ctx context.Context, mode storage.ModeGet, addrs ...swarm
 	chunks = make([]swarm.Chunk, len(out))
 	for i, ch := range out {
 		chunks[i] = swarm.NewChunk(swarm.NewAddress(ch.Address), ch.Data).
-			WithStamp(postage.NewStamp(ch.BatchID, ch.Index, ch.Timestamp, ch.Sig))
+			WithStamp(voucher.NewStamp(ch.BatchID, ch.Index, ch.Timestamp, ch.Sig))
 	}
 	return chunks, nil
 }

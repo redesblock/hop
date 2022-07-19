@@ -11,7 +11,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"resenje.org/web"
 
-	"github.com/redesblock/hop/core/auth"
+	"github.com/redesblock/hop/core/apikey"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/logging/httpaccess"
 )
@@ -54,7 +54,7 @@ func (s *Service) newBasicRouter() *mux.Router {
 
 	var handle = func(path string, handler http.Handler) {
 		if s.restricted {
-			handler = web.ChainHandlers(auth.PermissionCheckHandler(s.auth), web.FinalHandler(handler))
+			handler = web.ChainHandlers(apikey.PermissionCheckHandler(s.auth), web.FinalHandler(handler))
 		}
 		router.Handle(path, handler)
 	}
@@ -94,7 +94,7 @@ func (s *Service) newRouter() *mux.Router {
 
 	var handle = func(path string, handler http.Handler) {
 		if s.restricted {
-			handler = web.ChainHandlers(auth.PermissionCheckHandler(s.auth), web.FinalHandler(handler))
+			handler = web.ChainHandlers(apikey.PermissionCheckHandler(s.auth), web.FinalHandler(handler))
 		}
 		router.Handle(path, handler)
 	}

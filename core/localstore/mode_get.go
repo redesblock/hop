@@ -5,11 +5,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/sharky"
 	"github.com/redesblock/hop/core/shed"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/voucher"
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
@@ -36,7 +36,7 @@ func (db *DB) Get(ctx context.Context, mode storage.ModeGet, addr swarm.Address)
 		return nil, err
 	}
 	return swarm.NewChunk(swarm.NewAddress(out.Address), out.Data).
-		WithStamp(postage.NewStamp(out.BatchID, out.Index, out.Timestamp, out.Sig)), nil
+		WithStamp(voucher.NewStamp(out.BatchID, out.Index, out.Timestamp, out.Sig)), nil
 }
 
 // get returns Item from the retrieval index

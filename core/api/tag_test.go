@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/redesblock/hop/core/logging"
-	mockpost "github.com/redesblock/hop/core/postage/mock"
 	statestore "github.com/redesblock/hop/core/statestore/mock"
+	mockpost "github.com/redesblock/hop/core/voucher/mock"
 
 	"github.com/gorilla/websocket"
 	"github.com/redesblock/hop/core/api"

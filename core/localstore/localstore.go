@@ -16,13 +16,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/pinning"
-	"github.com/redesblock/hop/core/postage"
-	"github.com/redesblock/hop/core/postage/batchstore"
 	"github.com/redesblock/hop/core/sharky"
 	"github.com/redesblock/hop/core/shed"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
+	"github.com/redesblock/hop/core/voucher"
+	"github.com/redesblock/hop/core/voucher/batchstore"
 	"github.com/spf13/afero"
 	"github.com/syndtr/goleveldb/leveldb"
 )
@@ -94,13 +94,13 @@ type DB struct {
 	// pin files Index
 	pinIndex shed.Index
 
-	// postage chunks index
+	// voucher chunks index
 	postageChunksIndex shed.Index
 
-	// postage radius index
+	// voucher radius index
 	postageRadiusIndex shed.Index
 
-	// postage index index
+	// voucher index index
 	postageIndexIndex shed.Index
 
 	// field that stores number of items in gc index
@@ -116,7 +116,7 @@ type DB struct {
 	// the size of the reserve in chunks
 	reserveCapacity uint64
 
-	unreserveFunc func(postage.UnreserveIteratorFn) error
+	unreserveFunc func(voucher.UnreserveIteratorFn) error
 
 	// triggers garbage collection event loop
 	collectGarbageTrigger chan struct{}
@@ -180,7 +180,7 @@ type Options struct {
 	ReserveCapacity uint64
 	// UnreserveFunc is an iterator needed to facilitate reserve
 	// eviction once ReserveCapacity is reached.
-	UnreserveFunc func(postage.UnreserveIteratorFn) error
+	UnreserveFunc func(voucher.UnreserveIteratorFn) error
 	// OpenFilesLimit defines the upper bound of open files that the
 	// the localstore should maintain at any point of time. It is
 	// passed on to the shed constructor.
@@ -385,7 +385,7 @@ func New(path string, baseKey []byte, ss storage.StateStorer, o *Options, logger
 	}
 
 	// Index storing actual chunk address, data and bin id.
-	headerSize := 16 + postage.StampSize
+	headerSize := 16 + voucher.StampSize
 	db.retrievalDataIndex, err = db.shed.NewIndex("Address->StoreTimestamp|BinID|BatchID|BatchIndex|Sig|Location", shed.IndexFuncs{
 		EncodeKey: func(fields shed.Item) (key []byte, err error) {
 			return fields.Address, nil
@@ -398,7 +398,7 @@ func New(path string, baseKey []byte, ss storage.StateStorer, o *Options, logger
 			b := make([]byte, headerSize)
 			binary.BigEndian.PutUint64(b[:8], fields.BinID)
 			binary.BigEndian.PutUint64(b[8:16], uint64(fields.StoreTimestamp))
-			stamp, err := postage.NewStamp(fields.BatchID, fields.Index, fields.Timestamp, fields.Sig).MarshalBinary()
+			stamp, err := voucher.NewStamp(fields.BatchID, fields.Index, fields.Timestamp, fields.Sig).MarshalBinary()
 			if err != nil {
 				return nil, err
 			}
@@ -409,7 +409,7 @@ func New(path string, baseKey []byte, ss storage.StateStorer, o *Options, logger
 		DecodeValue: func(keyItem shed.Item, value []byte) (e shed.Item, err error) {
 			e.StoreTimestamp = int64(binary.BigEndian.Uint64(value[8:16]))
 			e.BinID = binary.BigEndian.Uint64(value[:8])
-			stamp := new(postage.Stamp)
+			stamp := new(voucher.Stamp)
 			if err = stamp.UnmarshalBinary(value[16:headerSize]); err != nil {
 				return e, err
 			}
@@ -535,7 +535,7 @@ func New(path string, baseKey []byte, ss storage.StateStorer, o *Options, logger
 		DecodeValue: func(keyItem shed.Item, value []byte) (e shed.Item, err error) {
 			e.BatchID = make([]byte, 32)
 			copy(e.BatchID, value[:32])
-			e.Index = make([]byte, postage.IndexSize)
+			e.Index = make([]byte, voucher.IndexSize)
 			copy(e.Index, value[32:])
 			return e, nil
 		},

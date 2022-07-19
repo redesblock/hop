@@ -12,11 +12,11 @@ import (
 	"github.com/redesblock/hop/core/jsonhttp/jsonhttptest"
 	"github.com/redesblock/hop/core/logging"
 	pinning "github.com/redesblock/hop/core/pinning/mock"
-	mockpost "github.com/redesblock/hop/core/postage/mock"
 	statestore "github.com/redesblock/hop/core/statestore/mock"
 	"github.com/redesblock/hop/core/storage/mock"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
+	mockpost "github.com/redesblock/hop/core/voucher/mock"
 	"gitlab.com/nolash/go-mockbytes"
 )
 

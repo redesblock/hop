@@ -17,17 +17,14 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/redesblock/hop/core/api"
-	mockauth "github.com/redesblock/hop/core/auth/mock"
+	mockauth "github.com/redesblock/hop/core/apikey/mock"
 	"github.com/redesblock/hop/core/crypto"
-	"github.com/redesblock/hop/core/feeds"
 	"github.com/redesblock/hop/core/file/pipeline"
 	"github.com/redesblock/hop/core/file/pipeline/builder"
 	"github.com/redesblock/hop/core/jsonhttp/jsonhttptest"
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/pinning"
-	"github.com/redesblock/hop/core/postage"
-	mockpost "github.com/redesblock/hop/core/postage/mock"
-	"github.com/redesblock/hop/core/postage/postagecontract"
+	"github.com/redesblock/hop/core/pns"
 	"github.com/redesblock/hop/core/pss"
 	"github.com/redesblock/hop/core/pusher"
 	"github.com/redesblock/hop/core/resolver"
@@ -40,6 +37,9 @@ import (
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
 	"github.com/redesblock/hop/core/traversal"
+	"github.com/redesblock/hop/core/voucher"
+	mockpost "github.com/redesblock/hop/core/voucher/mock"
+	"github.com/redesblock/hop/core/voucher/vouchercontract"
 	"resenje.org/web"
 )
 
@@ -68,10 +68,10 @@ type testServerOptions struct {
 	WsPingPeriod       time.Duration
 	Logger             logging.Logger
 	PreventRedirect    bool
-	Feeds              feeds.Factory
+	Feeds              pns.Factory
 	CORSAllowedOrigins []string
-	PostageContract    postagecontract.Interface
-	Post               postage.Service
+	PostageContract    vouchercontract.Interface
+	Post               voucher.Service
 	Steward            steward.Interface
 	WsHeaders          http.Header
 	Authenticator      *mockauth.Auth
@@ -282,14 +282,14 @@ func TestCalculateNumberOfChunksEncrypted(t *testing.T) {
 	}
 }
 
-// TestPostageHeaderError tests that incorrect postage batch ids
+// TestPostageHeaderError tests that incorrect voucher batch ids
 // provided to the api correct the appropriate error code.
 func TestPostageHeaderError(t *testing.T) {
 	var (
 		mockStorer      = mock.NewStorer()
 		mockStatestore  = statestore.NewStateStore()
 		logger          = logging.New(io.Discard, 5)
-		mp              = mockpost.New(mockpost.WithIssuer(postage.NewStampIssuer("", "", batchOk, big.NewInt(3), 11, 10, 1000, true)))
+		mp              = mockpost.New(mockpost.WithIssuer(voucher.NewStampIssuer("", "", batchOk, big.NewInt(3), 11, 10, 1000, true)))
 		client, _, _, _ = newTestServer(t, testServerOptions{
 			Storer: mockStorer,
 			Tags:   tags.NewTags(mockStatestore, logger),
@@ -334,14 +334,14 @@ func TestPostageHeaderError(t *testing.T) {
 	}
 }
 
-// TestPostageDirectAndDeferred tests that incorrect postage batch ids
+// TestPostageDirectAndDeferred tests that incorrect voucher batch ids
 // provided to the api correct the appropriate error code.
 func TestPostageDirectAndDeferred(t *testing.T) {
 	var (
 		mockStorer               = mock.NewStorer()
 		mockStatestore           = statestore.NewStateStore()
 		logger                   = logging.New(io.Discard, 5)
-		mp                       = mockpost.New(mockpost.WithIssuer(postage.NewStampIssuer("", "", batchOk, big.NewInt(3), 11, 10, 1000, true)))
+		mp                       = mockpost.New(mockpost.WithIssuer(voucher.NewStampIssuer("", "", batchOk, big.NewInt(3), 11, 10, 1000, true)))
 		client, _, _, chanStorer = newTestServer(t, testServerOptions{
 			Storer:       mockStorer,
 			Tags:         tags.NewTags(mockStatestore, logger),

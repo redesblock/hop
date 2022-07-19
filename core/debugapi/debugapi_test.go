@@ -23,12 +23,9 @@ import (
 	"github.com/redesblock/hop/core/logging"
 	p2pmock "github.com/redesblock/hop/core/p2p/mock"
 	"github.com/redesblock/hop/core/pingpong"
-	"github.com/redesblock/hop/core/postage"
-	mockpost "github.com/redesblock/hop/core/postage/mock"
-	"github.com/redesblock/hop/core/postage/postagecontract"
 	"github.com/redesblock/hop/core/resolver"
-	chequebookmock "github.com/redesblock/hop/core/settlement/swap/chequebook/mock"
-	swapmock "github.com/redesblock/hop/core/settlement/swap/mock"
+	chequebookmock "github.com/redesblock/hop/core/settle/swap/chequebook/mock"
+	swapmock "github.com/redesblock/hop/core/settle/swap/mock"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
@@ -37,9 +34,12 @@ import (
 	"github.com/redesblock/hop/core/transaction/backendmock"
 	transactionmock "github.com/redesblock/hop/core/transaction/mock"
 	"github.com/redesblock/hop/core/traversal"
+	"github.com/redesblock/hop/core/voucher"
+	mockpost "github.com/redesblock/hop/core/voucher/mock"
+	"github.com/redesblock/hop/core/voucher/vouchercontract"
 	"resenje.org/web"
 
-	erc20mock "github.com/redesblock/hop/core/settlement/swap/erc20/mock"
+	erc20mock "github.com/redesblock/hop/core/settle/swap/erc20/mock"
 )
 
 var (
@@ -69,11 +69,11 @@ type testServerOptions struct {
 	SettlementOpts     []swapmock.Option
 	ChequebookOpts     []chequebookmock.Option
 	SwapOpts           []swapmock.Option
-	BatchStore         postage.Storer
+	BatchStore         voucher.Storer
 	TransactionOpts    []transactionmock.Option
 	BackendOpts        []backendmock.Option
-	PostageContract    postagecontract.Interface
-	Post               postage.Service
+	PostageContract    vouchercontract.Interface
+	Post               voucher.Service
 	Traverser          traversal.Traverser
 	Erc20Opts          []erc20mock.Option
 	ChainID            int64

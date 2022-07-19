@@ -821,7 +821,7 @@ components:
 
     SwarmPostageBatchId:
       in: header
-      name: swarm-postage-batch-id
+      name: swarm-voucher-batch-id
       description: "ID of Postage Batch that is used to upload data with"
       required: true
       schema:

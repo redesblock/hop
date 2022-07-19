@@ -7,10 +7,10 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/redesblock/hop/core/jsonhttp"
-	"github.com/redesblock/hop/core/postage/postagecontract"
-	"github.com/redesblock/hop/core/settlement"
+	"github.com/redesblock/hop/core/settle"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/util/bigint"
+	"github.com/redesblock/hop/core/voucher/vouchercontract"
 )
 
 var (
@@ -33,7 +33,7 @@ type settlementsResponse struct {
 func (s *Service) settlementsHandler(w http.ResponseWriter, r *http.Request) {
 
 	settlementsSent, err := s.swap.SettlementsSent()
-	if errors.Is(err, postagecontract.ErrChainDisabled) {
+	if errors.Is(err, vouchercontract.ErrChainDisabled) {
 		s.logger.Debugf("debug api: sent settlements: %v", err)
 		s.logger.Error("debug api: can not get sent settlements")
 		jsonhttp.MethodNotAllowed(w, err)
@@ -105,16 +105,16 @@ func (s *Service) peerSettlementsHandler(w http.ResponseWriter, r *http.Request)
 	peerexists := false
 
 	received, err := s.swap.TotalReceived(peer)
-	if errors.Is(err, postagecontract.ErrChainDisabled) {
+	if errors.Is(err, vouchercontract.ErrChainDisabled) {
 		s.logger.Debugf("debug api: settlements peer: %v", err)
-		s.logger.Errorf("debug api: settlements peer: can't get peer %s received settlement", peer.String())
+		s.logger.Errorf("debug api: settlements peer: can't get peer %s received settle", peer.String())
 		jsonhttp.MethodNotAllowed(w, err)
 		return
 	}
 	if err != nil {
-		if !errors.Is(err, settlement.ErrPeerNoSettlements) {
-			s.logger.Debugf("debug api: settlements peer: get peer %s received settlement: %v", peer.String(), err)
-			s.logger.Errorf("debug api: settlements peer: can't get peer %s received settlement", peer.String())
+		if !errors.Is(err, settle.ErrPeerNoSettlements) {
+			s.logger.Debugf("debug api: settlements peer: get peer %s received settle: %v", peer.String(), err)
+			s.logger.Errorf("debug api: settlements peer: can't get peer %s received settle", peer.String())
 			jsonhttp.InternalServerError(w, errCantSettlementsPeer)
 			return
 		} else {
@@ -128,9 +128,9 @@ func (s *Service) peerSettlementsHandler(w http.ResponseWriter, r *http.Request)
 
 	sent, err := s.swap.TotalSent(peer)
 	if err != nil {
-		if !errors.Is(err, settlement.ErrPeerNoSettlements) {
-			s.logger.Debugf("debug api: settlements peer: get peer %s sent settlement: %v", peer.String(), err)
-			s.logger.Errorf("debug api: settlements peer: can't get peer %s sent settlement", peer.String())
+		if !errors.Is(err, settle.ErrPeerNoSettlements) {
+			s.logger.Debugf("debug api: settlements peer: get peer %s sent settle: %v", peer.String(), err)
+			s.logger.Errorf("debug api: settlements peer: can't get peer %s sent settle", peer.String())
 			jsonhttp.InternalServerError(w, errCantSettlementsPeer)
 			return
 		} else {
@@ -143,7 +143,7 @@ func (s *Service) peerSettlementsHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	if !peerexists {
-		jsonhttp.NotFound(w, settlement.ErrPeerNoSettlements)
+		jsonhttp.NotFound(w, settle.ErrPeerNoSettlements)
 		return
 	}
 

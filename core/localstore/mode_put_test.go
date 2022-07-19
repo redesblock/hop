@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/redesblock/hop/core/postage"
-	postagetesting "github.com/redesblock/hop/core/postage/testing"
 	"github.com/redesblock/hop/core/sharky"
 	"github.com/redesblock/hop/core/shed"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/voucher"
+	postagetesting "github.com/redesblock/hop/core/voucher/testing"
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
@@ -251,7 +251,7 @@ func TestModePutUpload(t *testing.T) {
 }
 
 // TestModePutSyncUpload_SameIndex tests that write-in-place for chunk
-// with same postage batch index and later timestamp works as expected.
+// with same voucher batch index and later timestamp works as expected.
 func TestModePutSyncUpload_SameIndex(t *testing.T) {
 	db := newTestDB(t, nil)
 
@@ -687,14 +687,14 @@ func TestModePut_ImmutableStamp(t *testing.T) {
 	}
 }
 
-func generateChunkWithTimestamp(stamp *postage.Stamp, timestamp int64) swarm.Chunk {
+func generateChunkWithTimestamp(stamp *voucher.Stamp, timestamp int64) swarm.Chunk {
 	tsBuf := make([]byte, 8)
 	binary.BigEndian.PutUint64(tsBuf, uint64(timestamp))
 	chunk := generateTestRandomChunk()
-	return chunk.WithStamp(postage.NewStamp(stamp.BatchID(), stamp.Index(), tsBuf, stamp.Sig()))
+	return chunk.WithStamp(voucher.NewStamp(stamp.BatchID(), stamp.Index(), tsBuf, stamp.Sig()))
 }
 
-func generateImmutableChunkWithTimestamp(stamp *postage.Stamp, timestamp int64) swarm.Chunk {
+func generateImmutableChunkWithTimestamp(stamp *voucher.Stamp, timestamp int64) swarm.Chunk {
 	return generateChunkWithTimestamp(stamp, timestamp).WithBatch(4, 12, 8, true)
 }
 

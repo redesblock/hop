@@ -27,13 +27,12 @@ import (
 	"github.com/redesblock/hop/core/account"
 	"github.com/redesblock/hop/core/account/addressbook"
 	"github.com/redesblock/hop/core/api"
-	"github.com/redesblock/hop/core/auth"
+	"github.com/redesblock/hop/core/apikey"
 	"github.com/redesblock/hop/core/chainsync"
 	"github.com/redesblock/hop/core/chainsyncer"
 	"github.com/redesblock/hop/core/config"
 	"github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/debugapi"
-	"github.com/redesblock/hop/core/feeds/factory"
 	"github.com/redesblock/hop/core/hive"
 	"github.com/redesblock/hop/core/localstore"
 	"github.com/redesblock/hop/core/logging"
@@ -43,11 +42,7 @@ import (
 	"github.com/redesblock/hop/core/p2p/libp2p"
 	"github.com/redesblock/hop/core/pingpong"
 	"github.com/redesblock/hop/core/pinning"
-	"github.com/redesblock/hop/core/postage"
-	"github.com/redesblock/hop/core/postage/batchservice"
-	"github.com/redesblock/hop/core/postage/batchstore"
-	"github.com/redesblock/hop/core/postage/listener"
-	"github.com/redesblock/hop/core/postage/postagecontract"
+	"github.com/redesblock/hop/core/pns/factory"
 	"github.com/redesblock/hop/core/pricer"
 	"github.com/redesblock/hop/core/pricing"
 	"github.com/redesblock/hop/core/pss"
@@ -58,11 +53,11 @@ import (
 	"github.com/redesblock/hop/core/pushsync"
 	"github.com/redesblock/hop/core/resolver/multiresolver"
 	"github.com/redesblock/hop/core/retrieval"
-	"github.com/redesblock/hop/core/settlement/pseudosettle"
-	"github.com/redesblock/hop/core/settlement/swap"
-	"github.com/redesblock/hop/core/settlement/swap/chequebook"
-	"github.com/redesblock/hop/core/settlement/swap/erc20"
-	"github.com/redesblock/hop/core/settlement/swap/priceoracle"
+	"github.com/redesblock/hop/core/settle/pseudo"
+	"github.com/redesblock/hop/core/settle/swap"
+	"github.com/redesblock/hop/core/settle/swap/chequebook"
+	"github.com/redesblock/hop/core/settle/swap/erc20"
+	"github.com/redesblock/hop/core/settle/swap/priceoracle"
 	"github.com/redesblock/hop/core/shed"
 	"github.com/redesblock/hop/core/steward"
 	"github.com/redesblock/hop/core/storage"
@@ -74,6 +69,11 @@ import (
 	"github.com/redesblock/hop/core/tracing"
 	"github.com/redesblock/hop/core/transaction"
 	"github.com/redesblock/hop/core/traversal"
+	"github.com/redesblock/hop/core/voucher"
+	"github.com/redesblock/hop/core/voucher/batchservice"
+	"github.com/redesblock/hop/core/voucher/batchstore"
+	"github.com/redesblock/hop/core/voucher/listener"
+	"github.com/redesblock/hop/core/voucher/vouchercontract"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/sync/errgroup"
@@ -264,10 +264,10 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 	b.transactionCloser = tracerCloser
 	b.transactionMonitorCloser = transactionMonitor
 
-	var authenticator *auth.Authenticator
+	var authenticator *apikey.Authenticator
 
 	if o.Restricted {
-		if authenticator, err = auth.New(o.TokenEncryptionKey, o.AdminPasswordHash, logger); err != nil {
+		if authenticator, err = apikey.New(o.TokenEncryptionKey, o.AdminPasswordHash, logger); err != nil {
 			return nil, fmt.Errorf("authenticator: %w", err)
 		}
 		logger.Info("starting with restricted APIs")
@@ -461,12 +461,12 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 		return nil, fmt.Errorf("invalid payment early: %d", o.PaymentEarly)
 	}
 
-	var initBatchState *postage.ChainSnapshot
-	// Bootstrap node with postage snapshot only if it is running on mainnet, is a fresh
+	var initBatchState *voucher.ChainSnapshot
+	// Bootstrap node with voucher snapshot only if it is running on mainnet, is a fresh
 	// install or explicitly asked by user to resync
 	if networkID == mainnetNetworkID && o.UsePostageSnapshot && (!batchStoreExists || o.Resync) {
 		start := time.Now()
-		logger.Info("cold postage start detected. fetching postage stamp snapshot from swarm")
+		logger.Info("cold voucher start detected. fetching voucher stamp snapshot from swarm")
 		initBatchState, err = bootstrapNode(
 			addr,
 			swarmAddress,
@@ -544,17 +544,17 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 	b.localstoreCloser = storer
 	unreserveFn = storer.UnreserveBatch
 
-	validStamp := postage.ValidStamp(batchStore)
-	post, err := postage.NewService(stateStore, batchStore, chainID)
+	validStamp := voucher.ValidStamp(batchStore)
+	post, err := voucher.NewService(stateStore, batchStore, chainID)
 	if err != nil {
-		return nil, fmt.Errorf("postage service load: %w", err)
+		return nil, fmt.Errorf("voucher service load: %w", err)
 	}
 	b.postageServiceCloser = post
 
 	var (
-		postageContractService postagecontract.Interface
-		batchSvc               postage.EventUpdater
-		eventListener          postage.Listener
+		postageContractService vouchercontract.Interface
+		batchSvc               voucher.EventUpdater
+		eventListener          voucher.Listener
 	)
 
 	var postageSyncStart uint64 = 0
@@ -563,11 +563,11 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 	postageContractAddress, startBlock := chainCfg.PostageStamp, chainCfg.StartBlock
 	if o.PostageContractAddress != "" {
 		if !common.IsHexAddress(o.PostageContractAddress) {
-			return nil, errors.New("malformed postage stamp address")
+			return nil, errors.New("malformed voucher stamp address")
 		}
 		postageContractAddress = common.HexToAddress(o.PostageContractAddress)
 	} else if !found {
-		return nil, errors.New("no known postage stamp addresses for this network")
+		return nil, errors.New("no known voucher stamp addresses for this network")
 	}
 	if found {
 		postageSyncStart = startBlock
@@ -581,12 +581,12 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 		return nil, err
 	}
 
-	erc20Address, err := postagecontract.LookupERC20Address(p2pCtx, transactionService, postageContractAddress, chainEnabled)
+	erc20Address, err := vouchercontract.LookupERC20Address(p2pCtx, transactionService, postageContractAddress, chainEnabled)
 	if err != nil {
 		return nil, err
 	}
 
-	postageContractService = postagecontract.New(
+	postageContractService = vouchercontract.New(
 		overlayEthAddress,
 		postageContractAddress,
 		erc20Address,
@@ -650,8 +650,8 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 		if err != nil {
 			return nil, fmt.Errorf("unable to start batch service: %w", err)
 		}
-		// wait for the postage contract listener to sync
-		logger.Info("waiting to sync postage contract data, this may take a while... more info available in Debug loglevel")
+		// wait for the voucher contract listener to sync
+		logger.Info("waiting to sync voucher contract data, this may take a while... more info available in Debug loglevel")
 
 		// arguably this is not a very nice solution since we dont support
 		// interrupts at this stage of the application lifecycle. some changes
@@ -701,9 +701,9 @@ func New(addr string, publicKey *ecdsa.PublicKey, signer crypto.Signer, networkI
 		enforcedRefreshRate = big.NewInt(lightRefreshRate)
 	}
 
-	pseudosettleService := pseudosettle.New(p2ps, logger, stateStore, acc, enforcedRefreshRate, big.NewInt(lightRefreshRate), p2ps)
+	pseudosettleService := pseudo.New(p2ps, logger, stateStore, acc, enforcedRefreshRate, big.NewInt(lightRefreshRate), p2ps)
 	if err = p2ps.AddProtocol(pseudosettleService.Protocol()); err != nil {
-		return nil, fmt.Errorf("pseudosettle service: %w", err)
+		return nil, fmt.Errorf("pseudo service: %w", err)
 	}
 
 	acc.SetRefreshFunc(pseudosettleService.Pay)
@@ -1039,7 +1039,7 @@ func (b *Node) Shutdown(ctx context.Context) error {
 	}()
 	go func() {
 		defer wg.Done()
-		tryClose(b.postageServiceCloser, "postage service")
+		tryClose(b.postageServiceCloser, "voucher service")
 	}()
 
 	wg.Wait()

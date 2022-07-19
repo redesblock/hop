@@ -25,8 +25,8 @@ import (
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/p2p/protobuf"
-	"github.com/redesblock/hop/core/ratelimit"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/util/ratelimit"
 )
 
 const (

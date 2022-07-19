@@ -4,12 +4,12 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/sharky"
 	"github.com/redesblock/hop/core/shed"
+	"github.com/redesblock/hop/core/voucher"
 )
 
-const headerSize = 16 + postage.StampSize
+const headerSize = 16 + voucher.StampSize
 
 type locOrErr struct {
 	err error
@@ -35,7 +35,7 @@ func recovery(db *DB) (chan locOrErr, error) {
 			b := make([]byte, headerSize)
 			binary.BigEndian.PutUint64(b[:8], fields.BinID)
 			binary.BigEndian.PutUint64(b[8:16], uint64(fields.StoreTimestamp))
-			stamp, err := postage.NewStamp(fields.BatchID, fields.Index, fields.Timestamp, fields.Sig).MarshalBinary()
+			stamp, err := voucher.NewStamp(fields.BatchID, fields.Index, fields.Timestamp, fields.Sig).MarshalBinary()
 			if err != nil {
 				return nil, err
 			}
@@ -46,7 +46,7 @@ func recovery(db *DB) (chan locOrErr, error) {
 		DecodeValue: func(keyItem shed.Item, value []byte) (e shed.Item, err error) {
 			e.StoreTimestamp = int64(binary.BigEndian.Uint64(value[8:16]))
 			e.BinID = binary.BigEndian.Uint64(value[:8])
-			stamp := new(postage.Stamp)
+			stamp := new(voucher.Stamp)
 			if err = stamp.UnmarshalBinary(value[16:headerSize]); err != nil {
 				return e, err
 			}

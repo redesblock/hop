@@ -12,18 +12,18 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/redesblock/hop/core/jsonhttp"
-	"github.com/redesblock/hop/core/postage"
-	"github.com/redesblock/hop/core/postage/postagecontract"
 	"github.com/redesblock/hop/core/sctx"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/util/bigint"
+	"github.com/redesblock/hop/core/voucher"
+	"github.com/redesblock/hop/core/voucher/vouchercontract"
 )
 
 func (s *Service) postageAccessHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.postageSem.TryAcquire(1) {
-			s.logger.Debug("postage access: simultaneous on-chain operations not supported")
-			s.logger.Error("postage access: simultaneous on-chain operations not supported")
+			s.logger.Debug("voucher access: simultaneous on-chain operations not supported")
+			s.logger.Error("voucher access: simultaneous on-chain operations not supported")
 			jsonhttp.TooManyRequests(w, "simultaneous on-chain operations not supported")
 			return
 		}
@@ -51,7 +51,7 @@ func (s *Service) postageCreateHandler(w http.ResponseWriter, r *http.Request) {
 	amount, ok := big.NewInt(0).SetString(mux.Vars(r)["amount"], 10)
 	if !ok {
 		s.logger.Error("create batch: invalid amount")
-		jsonhttp.BadRequest(w, "invalid postage amount")
+		jsonhttp.BadRequest(w, "invalid voucher amount")
 		return
 
 	}
@@ -84,19 +84,19 @@ func (s *Service) postageCreateHandler(w http.ResponseWriter, r *http.Request) {
 
 	batchID, err := s.postageContract.CreateBatch(ctx, amount, uint8(depth), immutable, label)
 	if err != nil {
-		if errors.Is(err, postagecontract.ErrChainDisabled) {
+		if errors.Is(err, vouchercontract.ErrChainDisabled) {
 			s.logger.Debugf("create batch: no chain backend: %v", err)
 			s.logger.Error("create batch: no chain backend")
 			jsonhttp.MethodNotAllowed(w, "no chain backend")
 			return
 		}
-		if errors.Is(err, postagecontract.ErrInsufficientFunds) {
+		if errors.Is(err, vouchercontract.ErrInsufficientFunds) {
 			s.logger.Debugf("create batch: out of funds: %v", err)
 			s.logger.Error("create batch: out of funds")
 			jsonhttp.BadRequest(w, "out of funds")
 			return
 		}
-		if errors.Is(err, postagecontract.ErrInvalidDepth) {
+		if errors.Is(err, vouchercontract.ErrInvalidDepth) {
 			s.logger.Debugf("create batch: invalid depth: %v", err)
 			s.logger.Error("create batch: invalid depth")
 			jsonhttp.BadRequest(w, "invalid depth")
@@ -193,7 +193,7 @@ func (s *Service) postageGetStampsHandler(w http.ResponseWriter, r *http.Request
 
 func (s *Service) postageGetAllStampsHandler(w http.ResponseWriter, _ *http.Request) {
 	batches := make([]postageBatchResponse, 0)
-	err := s.batchStore.Iterate(func(b *postage.Batch) (bool, error) {
+	err := s.batchStore.Iterate(func(b *voucher.Batch) (bool, error) {
 		batchTTL, err := s.estimateBatchTTL(b)
 		if err != nil {
 			return false, fmt.Errorf("estimate batch ttl: %w", err)
@@ -282,7 +282,7 @@ func (s *Service) postageGetStampHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	issuer, err := s.post.GetStampIssuer(id)
-	if err != nil && !errors.Is(err, postage.ErrNotUsable) {
+	if err != nil && !errors.Is(err, voucher.ErrNotUsable) {
 		s.logger.Debugf("get stamp issuer: get issuer: %v", err)
 		s.logger.Error("get stamp issuer: get issuer")
 		jsonhttp.BadRequest(w, "cannot get issuer")
@@ -332,7 +332,7 @@ type reserveStateResponse struct {
 
 type chainStateResponse struct {
 	ChainTip     uint64         `json:"chainTip"`     // The current highest block number from the chain backend.
-	Block        uint64         `json:"block"`        // The block number of the last postage event.
+	Block        uint64         `json:"block"`        // The block number of the last voucher event.
 	TotalAmount  *bigint.BigInt `json:"totalAmount"`  // Cumulative amount paid per stamp.
 	CurrentPrice *bigint.BigInt `json:"currentPrice"` // Hop/chunk/block normalised price.
 }
@@ -341,7 +341,7 @@ func (s *Service) reserveStateHandler(w http.ResponseWriter, _ *http.Request) {
 	state := s.batchStore.GetReserveState()
 
 	commitment := int64(0)
-	if err := s.batchStore.Iterate(func(b *postage.Batch) (bool, error) {
+	if err := s.batchStore.Iterate(func(b *voucher.Batch) (bool, error) {
 		commitment += int64(math.Pow(2.0, float64(b.Depth)))
 		return false, nil
 	}); err != nil {
@@ -395,7 +395,7 @@ func (s *Service) estimateBatchTTLFromID(id []byte) (int64, error) {
 
 // estimateBatchTTL estimates the time remaining until the batch expires.
 // The -1 signals that the batch never expires.
-func (s *Service) estimateBatchTTL(batch *postage.Batch) (int64, error) {
+func (s *Service) estimateBatchTTL(batch *voucher.Batch) (int64, error) {
 	state := s.batchStore.GetChainState()
 	if len(state.CurrentPrice.Bits()) == 0 {
 		return -1, nil
@@ -431,7 +431,7 @@ func (s *Service) postageTopUpHandler(w http.ResponseWriter, r *http.Request) {
 	amount, ok := big.NewInt(0).SetString(mux.Vars(r)["amount"], 10)
 	if !ok {
 		s.logger.Error("topup batch: invalid amount")
-		jsonhttp.BadRequest(w, "invalid postage amount")
+		jsonhttp.BadRequest(w, "invalid voucher amount")
 		return
 	}
 
@@ -448,7 +448,7 @@ func (s *Service) postageTopUpHandler(w http.ResponseWriter, r *http.Request) {
 
 	err = s.postageContract.TopUpBatch(ctx, id, amount)
 	if err != nil {
-		if errors.Is(err, postagecontract.ErrInsufficientFunds) {
+		if errors.Is(err, vouchercontract.ErrInsufficientFunds) {
 			s.logger.Debugf("topup batch: out of funds: %v", err)
 			s.logger.Error("topup batch: out of funds")
 			jsonhttp.PaymentRequired(w, "out of funds")
@@ -502,7 +502,7 @@ func (s *Service) postageDiluteHandler(w http.ResponseWriter, r *http.Request) {
 
 	err = s.postageContract.DiluteBatch(ctx, id, uint8(depth))
 	if err != nil {
-		if errors.Is(err, postagecontract.ErrInvalidDepth) {
+		if errors.Is(err, vouchercontract.ErrInvalidDepth) {
 			s.logger.Debugf("dilute batch: invalid depth: %v", err)
 			s.logger.Error("dilte batch: invalid depth")
 			jsonhttp.BadRequest(w, "invalid depth")

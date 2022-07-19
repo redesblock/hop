@@ -15,7 +15,6 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/redesblock/hop/core/account/addressbook"
 	"github.com/redesblock/hop/core/blocker"
-	"github.com/redesblock/hop/core/discovery"
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/pingpong"
@@ -88,7 +87,7 @@ type Options struct {
 // Kad is the Swarm forwarding kademlia implementation.
 type Kad struct {
 	base              swarm.Address         // this node's overlay address
-	discovery         discovery.Driver      // the discovery driver
+	discovery         Driver                // the discovery driver
 	addressBook       addressbook.Interface // address book to get underlays
 	p2p               p2p.Service           // p2p service to connect to nodes with
 	saturationFunc    binSaturationFunc     // pluggable saturation function
@@ -126,7 +125,7 @@ type Kad struct {
 func New(
 	base swarm.Address,
 	addressbook addressbook.Interface,
-	discovery discovery.Driver,
+	discovery Driver,
 	p2pSvc p2p.Service,
 	pinger pingpong.Interface,
 	metricsDB *shed.DB,

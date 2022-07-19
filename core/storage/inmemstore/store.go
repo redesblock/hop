@@ -10,7 +10,7 @@ import (
 
 // Store implements a simple Putter and Getter which can be used to temporarily cache
 // chunks. Currently this is used in the bootstrapping process of new nodes where
-// we sync the postage events from the swarm network.
+// we sync the voucher events from the swarm network.
 type Store struct {
 	mtx   sync.Mutex
 	store map[string]swarm.Chunk

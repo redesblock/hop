@@ -13,9 +13,9 @@ import (
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/jsonhttp/jsonhttptest"
 	"github.com/redesblock/hop/core/sctx"
-	"github.com/redesblock/hop/core/settlement/swap/chequebook"
-	"github.com/redesblock/hop/core/settlement/swap/chequebook/mock"
-	swapmock "github.com/redesblock/hop/core/settlement/swap/mock"
+	"github.com/redesblock/hop/core/settle/swap/chequebook"
+	"github.com/redesblock/hop/core/settle/swap/chequebook/mock"
+	swapmock "github.com/redesblock/hop/core/settle/swap/mock"
 	"github.com/redesblock/hop/core/util/bigint"
 
 	"github.com/redesblock/hop/core/swarm"

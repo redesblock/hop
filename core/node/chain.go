@@ -20,17 +20,17 @@ import (
 	"github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p/libp2p"
-	"github.com/redesblock/hop/core/postage/postagecontract"
 	"github.com/redesblock/hop/core/sctx"
-	"github.com/redesblock/hop/core/settlement"
-	"github.com/redesblock/hop/core/settlement/swap"
-	"github.com/redesblock/hop/core/settlement/swap/chequebook"
-	"github.com/redesblock/hop/core/settlement/swap/erc20"
-	"github.com/redesblock/hop/core/settlement/swap/priceoracle"
-	"github.com/redesblock/hop/core/settlement/swap/swapprotocol"
+	"github.com/redesblock/hop/core/settle"
+	"github.com/redesblock/hop/core/settle/swap"
+	"github.com/redesblock/hop/core/settle/swap/chequebook"
+	"github.com/redesblock/hop/core/settle/swap/erc20"
+	"github.com/redesblock/hop/core/settle/swap/priceoracle"
+	"github.com/redesblock/hop/core/settle/swap/swapprotocol"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/transaction"
 	"github.com/redesblock/hop/core/transaction/wrapped"
+	"github.com/redesblock/hop/core/voucher/vouchercontract"
 )
 
 const (
@@ -232,7 +232,7 @@ func InitSwap(
 	chequebookService chequebook.Service,
 	chequeStore chequebook.ChequeStore,
 	cashoutService chequebook.CashoutService,
-	accounting settlement.Accounting,
+	accounting settle.Accounting,
 	priceOracleAddress string,
 	chainID int64,
 	transactionService transaction.Service,
@@ -342,31 +342,31 @@ func GetTxNextBlock(ctx context.Context, logger logging.Logger, backend transact
 type noOpChequebookService struct{}
 
 func (m *noOpChequebookService) Deposit(context.Context, *big.Int) (hash common.Hash, err error) {
-	return hash, postagecontract.ErrChainDisabled
+	return hash, vouchercontract.ErrChainDisabled
 }
 func (m *noOpChequebookService) Withdraw(context.Context, *big.Int) (hash common.Hash, err error) {
-	return hash, postagecontract.ErrChainDisabled
+	return hash, vouchercontract.ErrChainDisabled
 }
 func (m *noOpChequebookService) WaitForDeposit(context.Context, common.Hash) error {
-	return postagecontract.ErrChainDisabled
+	return vouchercontract.ErrChainDisabled
 }
 func (m *noOpChequebookService) Balance(context.Context) (*big.Int, error) {
-	return nil, postagecontract.ErrChainDisabled
+	return nil, vouchercontract.ErrChainDisabled
 }
 func (m *noOpChequebookService) AvailableBalance(context.Context) (*big.Int, error) {
-	return nil, postagecontract.ErrChainDisabled
+	return nil, vouchercontract.ErrChainDisabled
 }
 func (m *noOpChequebookService) Address() common.Address {
 	return common.Address{}
 }
 func (m *noOpChequebookService) Issue(context.Context, common.Address, *big.Int, chequebook.SendChequeFunc) (*big.Int, error) {
-	return nil, postagecontract.ErrChainDisabled
+	return nil, vouchercontract.ErrChainDisabled
 }
 func (m *noOpChequebookService) LastCheque(common.Address) (*chequebook.SignedCheque, error) {
-	return nil, postagecontract.ErrChainDisabled
+	return nil, vouchercontract.ErrChainDisabled
 }
 func (m *noOpChequebookService) LastCheques() (map[common.Address]*chequebook.SignedCheque, error) {
-	return nil, postagecontract.ErrChainDisabled
+	return nil, vouchercontract.ErrChainDisabled
 }
 
 func (m *noOpChequebookService) Txs() ([]string, error) {

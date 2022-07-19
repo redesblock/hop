@@ -16,7 +16,6 @@ import (
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/p2p/protobuf"
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/pricer"
 	pb "github.com/redesblock/hop/core/retrieval/pb"
 	"github.com/redesblock/hop/core/soc"
@@ -24,6 +23,7 @@ import (
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/topology"
 	"github.com/redesblock/hop/core/tracing"
+	"github.com/redesblock/hop/core/voucher"
 	"resenje.org/singleflight"
 )
 
@@ -60,10 +60,10 @@ type Service struct {
 	pricer        pricer.Interface
 	tracer        *tracing.Tracer
 	caching       bool
-	validStamp    postage.ValidStampFn
+	validStamp    voucher.ValidStampFn
 }
 
-func New(addr swarm.Address, storer storage.Storer, streamer p2p.Streamer, chunkPeerer topology.EachPeerer, logger logging.Logger, accounting account.Interface, pricer pricer.Interface, tracer *tracing.Tracer, forwarderCaching bool, validStamp postage.ValidStampFn) *Service {
+func New(addr swarm.Address, storer storage.Storer, streamer p2p.Streamer, chunkPeerer topology.EachPeerer, logger logging.Logger, accounting account.Interface, pricer pricer.Interface, tracer *tracing.Tracer, forwarderCaching bool, validStamp voucher.ValidStampFn) *Service {
 	return &Service{
 		addr:          addr,
 		streamer:      streamer,
@@ -311,7 +311,7 @@ func (s *Service) retrieveChunk(ctx context.Context, addr swarm.Address, sp *ski
 	s.metrics.ChunkRetrieveTime.Observe(time.Since(startTimer).Seconds())
 	s.metrics.TotalRetrieved.Inc()
 
-	stamp := new(postage.Stamp)
+	stamp := new(voucher.Stamp)
 	err = stamp.UnmarshalBinary(d.Stamp)
 	if err != nil {
 		return nil, peer, true, fmt.Errorf("stamp unmarshal: %w", err)
@@ -453,7 +453,7 @@ func (s *Service) handler(ctx context.Context, p p2p.Peer, stream p2p.Stream) (e
 
 		cch, err := s.validStamp(chunk, stamp)
 		if err != nil {
-			// if a chunk with an invalid postage stamp was received
+			// if a chunk with an invalid voucher stamp was received
 			// we force it into the cache.
 			putMode = storage.ModePutRequestCache
 			cch = chunk

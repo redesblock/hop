@@ -19,12 +19,12 @@ import (
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/manifest"
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/sctx"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
 	"github.com/redesblock/hop/core/tracing"
+	"github.com/redesblock/hop/core/voucher"
 )
 
 // dirUploadHandler uploads a directory supplied as a tar in an HTTP request
@@ -84,7 +84,7 @@ func (s *server) dirUploadHandler(w http.ResponseWriter, r *http.Request, storer
 		logger.Debugf("hop upload dir: store dir err: %v", err)
 		logger.Errorf("hop upload dir: store dir")
 		switch {
-		case errors.Is(err, postage.ErrBucketFull):
+		case errors.Is(err, voucher.ErrBucketFull):
 			jsonhttp.PaymentRequired(w, "batch is overissued")
 		default:
 			jsonhttp.InternalServerError(w, errDirectoryStore)

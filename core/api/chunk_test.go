@@ -9,8 +9,8 @@ import (
 
 	"github.com/redesblock/hop/core/logging"
 	pinning "github.com/redesblock/hop/core/pinning/mock"
-	mockpost "github.com/redesblock/hop/core/postage/mock"
 	statestore "github.com/redesblock/hop/core/statestore/mock"
+	mockpost "github.com/redesblock/hop/core/voucher/mock"
 
 	"github.com/redesblock/hop/core/tags"
 

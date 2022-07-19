@@ -44,7 +44,7 @@ func (c *command) initUploadCmd() error {
 			//req.Header.Set("Content-Length", strconv.Itoa(buf.Len()))
 			req.Header.Set("swarm-collection", "true")
 			req.Header.Set("swarm-index-document", sfileInfo.Name())
-			req.Header.Set("swarm-postage-batch-id", args[0])
+			req.Header.Set("swarm-voucher-batch-id", args[0])
 			response, err := client.Do(req)
 			if err != nil {
 				return err

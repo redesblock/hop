@@ -21,12 +21,12 @@ import (
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/jsonhttp/jsonhttptest"
 	"github.com/redesblock/hop/core/logging"
-	"github.com/redesblock/hop/core/postage"
-	mockpost "github.com/redesblock/hop/core/postage/mock"
 	"github.com/redesblock/hop/core/pss"
 	"github.com/redesblock/hop/core/pushsync"
 	"github.com/redesblock/hop/core/storage/mock"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/voucher"
+	mockpost "github.com/redesblock/hop/core/voucher/mock"
 )
 
 var (
@@ -182,7 +182,7 @@ func TestPssSend(t *testing.T) {
 			mtx.Unlock()
 			return err
 		}
-		mp              = mockpost.New(mockpost.WithIssuer(postage.NewStampIssuer("", "", batchOk, big.NewInt(3), 11, 10, 1000, true)))
+		mp              = mockpost.New(mockpost.WithIssuer(voucher.NewStampIssuer("", "", batchOk, big.NewInt(3), 11, 10, 1000, true)))
 		p               = newMockPss(sendFn)
 		client, _, _, _ = newTestServer(t, testServerOptions{
 			Pss:    p,
@@ -228,7 +228,7 @@ func TestPssSend(t *testing.T) {
 			jsonhttptest.WithRequestHeader(api.SwarmPostageBatchIdHeader, hexbatch),
 			jsonhttptest.WithRequestBody(bytes.NewReader(payload)),
 			jsonhttptest.WithExpectedJSONResponse(jsonhttp.StatusResponse{
-				Message: "invalid postage batch id",
+				Message: "invalid voucher batch id",
 				Code:    http.StatusBadRequest,
 			}),
 		)
@@ -431,7 +431,7 @@ func newMockPss(f pssSendFn) *mpss {
 }
 
 // Send arbitrary byte slice with the given topic to Targets.
-func (m *mpss) Send(ctx context.Context, topic pss.Topic, payload []byte, _ postage.Stamper, recipient *ecdsa.PublicKey, targets pss.Targets) error {
+func (m *mpss) Send(ctx context.Context, topic pss.Topic, payload []byte, _ voucher.Stamper, recipient *ecdsa.PublicKey, targets pss.Targets) error {
 	chunk, err := pss.Wrap(ctx, topic, payload, recipient, targets)
 	if err != nil {
 		return err

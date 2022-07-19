@@ -61,7 +61,7 @@ paths:
 
   "/refresh":
     post:
-      summary: "Refresh the auth token - This endpoint is experimental"
+      summary: "Refresh the apikey token - This endpoint is experimental"
       tags:
         - Auth
       security:

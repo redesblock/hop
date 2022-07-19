@@ -13,11 +13,11 @@ import (
 
 	"github.com/redesblock/hop/core/cac"
 	"github.com/redesblock/hop/core/logging"
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/retrieval"
 	"github.com/redesblock/hop/core/soc"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/voucher"
 )
 
 const (
@@ -28,7 +28,7 @@ type store struct {
 	storage.Storer
 	retrieval  retrieval.Interface
 	logger     logging.Logger
-	validStamp postage.ValidStampFn
+	validStamp voucher.ValidStampFn
 	bgWorkers  chan struct{}
 	sCtx       context.Context
 	sCancel    context.CancelFunc
@@ -41,7 +41,7 @@ var (
 )
 
 // New returns a new NetStore that wraps a given Storer.
-func New(s storage.Storer, validStamp postage.ValidStampFn, r retrieval.Interface, logger logging.Logger) storage.Storer {
+func New(s storage.Storer, validStamp voucher.ValidStampFn, r retrieval.Interface, logger logging.Logger) storage.Storer {
 	ns := &store{
 		Storer:     s,
 		validStamp: validStamp,
@@ -118,7 +118,7 @@ func (s *store) put(ch swarm.Chunk, mode storage.ModeGet) {
 
 		cch, err := s.validStamp(ch, stamp)
 		if err != nil {
-			// if a chunk with an invalid postage stamp was received
+			// if a chunk with an invalid voucher stamp was received
 			// we force it into the cache.
 			putMode = storage.ModePutRequestCache
 			cch = ch

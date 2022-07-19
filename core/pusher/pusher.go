@@ -15,13 +15,13 @@ import (
 
 	"github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/logging"
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/pushsync"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
 	"github.com/redesblock/hop/core/topology"
 	"github.com/redesblock/hop/core/tracing"
+	"github.com/redesblock/hop/core/voucher"
 
 	"github.com/sirupsen/logrus"
 )
@@ -38,7 +38,7 @@ type Service struct {
 	networkID         uint64
 	storer            storage.Storer
 	pushSyncer        pushsync.PushSyncer
-	validStamp        postage.ValidStampFn
+	validStamp        voucher.ValidStampFn
 	depther           topology.NeighborhoodDepther
 	logger            logging.Logger
 	tag               *tags.Tags
@@ -65,7 +65,7 @@ var (
 
 const chunkStoreTimeout = 2 * time.Second
 
-func New(networkID uint64, storer storage.Storer, depther topology.NeighborhoodDepther, pushSyncer pushsync.PushSyncer, validStamp postage.ValidStampFn, tagger *tags.Tags, logger logging.Logger, tracer *tracing.Tracer, warmupTime time.Duration) *Service {
+func New(networkID uint64, storer storage.Storer, depther topology.NeighborhoodDepther, pushSyncer pushsync.PushSyncer, validStamp voucher.ValidStampFn, tagger *tags.Tags, logger logging.Logger, tracer *tracing.Tracer, warmupTime time.Duration) *Service {
 	p := &Service{
 		networkID:         networkID,
 		storer:            storer,

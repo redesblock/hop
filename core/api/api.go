@@ -18,17 +18,15 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/redesblock/hop/core/auth"
+	"github.com/redesblock/hop/core/apikey"
 	"github.com/redesblock/hop/core/crypto"
-	"github.com/redesblock/hop/core/feeds"
 	"github.com/redesblock/hop/core/file/pipeline"
 	"github.com/redesblock/hop/core/file/pipeline/builder"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/logging"
 	m "github.com/redesblock/hop/core/metrics"
 	"github.com/redesblock/hop/core/pinning"
-	"github.com/redesblock/hop/core/postage"
-	"github.com/redesblock/hop/core/postage/postagecontract"
+	"github.com/redesblock/hop/core/pns"
 	"github.com/redesblock/hop/core/pss"
 	"github.com/redesblock/hop/core/pusher"
 	"github.com/redesblock/hop/core/resolver"
@@ -39,6 +37,8 @@ import (
 	"github.com/redesblock/hop/core/topology"
 	"github.com/redesblock/hop/core/tracing"
 	"github.com/redesblock/hop/core/traversal"
+	"github.com/redesblock/hop/core/voucher"
+	"github.com/redesblock/hop/core/voucher/vouchercontract"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -82,7 +82,7 @@ var (
 	errInvalidContentType   = errors.New("invalid content-type")
 	errDirectoryStore       = errors.New("could not store directory")
 	errFileStore            = errors.New("could not store file")
-	errInvalidPostageBatch  = errors.New("invalid postage batch id")
+	errInvalidPostageBatch  = errors.New("invalid voucher batch id")
 )
 
 // Service is the API service interface.
@@ -110,10 +110,10 @@ type server struct {
 	steward         steward.Interface
 	logger          logging.Logger
 	tracer          *tracing.Tracer
-	feedFactory     feeds.Factory
+	feedFactory     pns.Factory
 	signer          crypto.Signer
-	post            postage.Service
-	postageContract postagecontract.Interface
+	post            voucher.Service
+	postageContract vouchercontract.Interface
 	chunkPushC      chan *pusher.Op
 	Options
 	http.Handler
@@ -136,7 +136,7 @@ const (
 )
 
 // New will create a and initialize a new API service.
-func New(tags *tags.Tags, storer storage.Storer, resolver resolver.Interface, pss pss.Interface, traversalService traversal.Traverser, pinning pinning.Interface, feedFactory feeds.Factory, post postage.Service, postageContract postagecontract.Interface, steward steward.Interface, signer crypto.Signer, auth authenticator, logger logging.Logger, tracer *tracing.Tracer, o Options) (Service, <-chan *pusher.Op) {
+func New(tags *tags.Tags, storer storage.Storer, resolver resolver.Interface, pss pss.Interface, traversalService traversal.Traverser, pinning pinning.Interface, feedFactory pns.Factory, post voucher.Service, postageContract vouchercontract.Interface, steward steward.Interface, signer crypto.Signer, auth authenticator, logger logging.Logger, tracer *tracing.Tracer, o Options) (Service, <-chan *pusher.Op) {
 	s := &server{
 		auth:            auth,
 		tags:            tags,
@@ -279,14 +279,14 @@ func (s *server) authHandler(w http.ResponseWriter, r *http.Request) {
 	_, pass, ok := r.BasicAuth()
 
 	if !ok {
-		s.logger.Error("api: auth handler: missing basic auth")
+		s.logger.Error("api: apikey handler: missing basic apikey")
 		w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
 		jsonhttp.Unauthorized(w, "Unauthorized")
 		return
 	}
 
 	if !s.auth.Authorize(pass) {
-		s.logger.Error("api: auth handler: unauthorized")
+		s.logger.Error("api: apikey handler: unauthorized")
 		w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
 		jsonhttp.Unauthorized(w, "Unauthorized")
 		return
@@ -294,30 +294,30 @@ func (s *server) authHandler(w http.ResponseWriter, r *http.Request) {
 
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		s.logger.Debugf("api: auth handler: read request body: %v", err)
-		s.logger.Error("api: auth handler: read request body")
+		s.logger.Debugf("api: apikey handler: read request body: %v", err)
+		s.logger.Error("api: apikey handler: read request body")
 		jsonhttp.BadRequest(w, "Read request body")
 		return
 	}
 
 	var payload securityTokenReq
 	if err = json.Unmarshal(body, &payload); err != nil {
-		s.logger.Debugf("api: auth handler: unmarshal request body: %v", err)
-		s.logger.Error("api: auth handler: unmarshal request body")
+		s.logger.Debugf("api: apikey handler: unmarshal request body: %v", err)
+		s.logger.Error("api: apikey handler: unmarshal request body")
 		jsonhttp.BadRequest(w, "Unmarshal json body")
 		return
 	}
 
 	key, err := s.auth.GenerateKey(payload.Role, payload.Expiry)
-	if errors.Is(err, auth.ErrExpiry) {
-		s.logger.Debugf("api: auth handler: generate key: %v", err)
-		s.logger.Error("api: auth handler: generate key")
+	if errors.Is(err, apikey.ErrExpiry) {
+		s.logger.Debugf("api: apikey handler: generate key: %v", err)
+		s.logger.Error("api: apikey handler: generate key")
 		jsonhttp.BadRequest(w, "Expiry duration must be a positive number")
 		return
 	}
 	if err != nil {
-		s.logger.Debugf("api: auth handler: add auth token: %v", err)
-		s.logger.Error("api: auth handler: add auth token")
+		s.logger.Debugf("api: apikey handler: add apikey token: %v", err)
+		s.logger.Error("api: apikey handler: add apikey token")
 		jsonhttp.InternalServerError(w, "Error generating authorization token")
 		return
 	}
@@ -345,31 +345,31 @@ func (s *server) refreshHandler(w http.ResponseWriter, r *http.Request) {
 
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		s.logger.Debugf("api: auth handler: read request body: %v", err)
-		s.logger.Error("api: auth handler: read request body")
+		s.logger.Debugf("api: apikey handler: read request body: %v", err)
+		s.logger.Error("api: apikey handler: read request body")
 		jsonhttp.BadRequest(w, "Read request body")
 		return
 	}
 
 	var payload securityTokenReq
 	if err = json.Unmarshal(body, &payload); err != nil {
-		s.logger.Debugf("api: auth handler: unmarshal request body: %v", err)
-		s.logger.Error("api: auth handler: unmarshal request body")
+		s.logger.Debugf("api: apikey handler: unmarshal request body: %v", err)
+		s.logger.Error("api: apikey handler: unmarshal request body")
 		jsonhttp.BadRequest(w, "Unmarshal json body")
 		return
 	}
 
 	key, err := s.auth.RefreshKey(authToken, payload.Expiry)
-	if errors.Is(err, auth.ErrTokenExpired) {
-		s.logger.Debugf("api: auth handler: refresh key: %v", err)
-		s.logger.Error("api: auth handler: refresh key")
+	if errors.Is(err, apikey.ErrTokenExpired) {
+		s.logger.Debugf("api: apikey handler: refresh key: %v", err)
+		s.logger.Error("api: apikey handler: refresh key")
 		jsonhttp.BadRequest(w, "Token expired")
 		return
 	}
 
 	if err != nil {
-		s.logger.Debugf("api: auth handler: refresh token: %v", err)
-		s.logger.Error("api: auth handler: refresh token")
+		s.logger.Debugf("api: apikey handler: refresh token: %v", err)
+		s.logger.Error("api: apikey handler: refresh token")
 		jsonhttp.InternalServerError(w, "Error refreshing authorization token")
 		return
 	}
@@ -493,7 +493,7 @@ func equalASCIIFold(s, t string) bool {
 func (s *server) newStamperPutter(r *http.Request) (storage.Storer, func() error, error) {
 	batch, err := requestPostageBatchId(r)
 	if err != nil {
-		return nil, noopWaitFn, fmt.Errorf("postage batch id: %w", err)
+		return nil, noopWaitFn, fmt.Errorf("voucher batch id: %w", err)
 	}
 
 	deferred, err := requestDeferred(r)
@@ -511,19 +511,19 @@ func (s *server) newStamperPutter(r *http.Request) (storage.Storer, func() error
 
 type pushStamperPutter struct {
 	storage.Storer
-	stamper postage.Stamper
+	stamper voucher.Stamper
 	eg      errgroup.Group
 	c       chan *pusher.Op
 	sem     chan struct{}
 }
 
-func newPushStamperPutter(s storage.Storer, post postage.Service, signer crypto.Signer, batch []byte, cc chan *pusher.Op) (*pushStamperPutter, error) {
+func newPushStamperPutter(s storage.Storer, post voucher.Service, signer crypto.Signer, batch []byte, cc chan *pusher.Op) (*pushStamperPutter, error) {
 	i, err := post.GetStampIssuer(batch)
 	if err != nil {
 		return nil, fmt.Errorf("stamp issuer: %w", err)
 	}
 
-	stamper := postage.NewStamper(i, signer)
+	stamper := voucher.NewStamper(i, signer)
 	return &pushStamperPutter{Storer: s, stamper: stamper, c: cc, sem: make(chan struct{}, uploadSem)}, nil
 }
 
@@ -581,16 +581,16 @@ func (p *pushStamperPutter) Put(ctx context.Context, mode storage.ModePut, chs .
 
 type stamperPutter struct {
 	storage.Storer
-	stamper postage.Stamper
+	stamper voucher.Stamper
 }
 
-func newStoringStamperPutter(s storage.Storer, post postage.Service, signer crypto.Signer, batch []byte) (*stamperPutter, error) {
+func newStoringStamperPutter(s storage.Storer, post voucher.Service, signer crypto.Signer, batch []byte) (*stamperPutter, error) {
 	i, err := post.GetStampIssuer(batch)
 	if err != nil {
 		return nil, fmt.Errorf("stamp issuer: %w", err)
 	}
 
-	stamper := postage.NewStamper(i, signer)
+	stamper := voucher.NewStamper(i, signer)
 	return &stamperPutter{Storer: s, stamper: stamper}, nil
 }
 

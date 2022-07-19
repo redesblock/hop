@@ -9,11 +9,11 @@ import (
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/p2p/streamtest"
-	postagetesting "github.com/redesblock/hop/core/postage/testing"
 	"github.com/redesblock/hop/core/pullsync"
 	"github.com/redesblock/hop/core/pullsync/pullstorage/mock"
 	testingc "github.com/redesblock/hop/core/storage/testing"
 	"github.com/redesblock/hop/core/swarm"
+	postagetesting "github.com/redesblock/hop/core/voucher/testing"
 )
 
 var (

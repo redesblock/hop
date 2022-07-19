@@ -5,7 +5,7 @@ import "./Ownable.sol";
 
 /**
  * @title PriceOracle contract
- * @dev The price oracle contract keeps track of the current prices for settlement in swap account.
+ * @dev The price oracle contract keeps track of the current prices for settle in swap account.
  */
 contract PriceOracle is Ownable {
     /**

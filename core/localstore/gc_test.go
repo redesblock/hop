@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/redesblock/hop/core/logging"
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/shed"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/voucher"
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
@@ -105,7 +105,7 @@ func testDBCollectGarbageWorker(t *testing.T) {
 
 	t.Run("pull index count", newItemsCountTest(db.pullIndex, int(gcTarget)))
 
-	t.Run("postage index count", newItemsCountTest(db.postageIndexIndex, int(gcTarget)))
+	t.Run("voucher index count", newItemsCountTest(db.postageIndexIndex, int(gcTarget)))
 
 	t.Run("gc index count", newItemsCountTest(db.gcIndex, int(gcTarget)))
 
@@ -217,7 +217,7 @@ func TestPinGC(t *testing.T) {
 
 	t.Run("pull index count", newItemsCountTest(db.pullIndex, int(gcTarget)+pinChunksCount))
 
-	t.Run("postage index count", newItemsCountTest(db.postageIndexIndex, int(gcTarget)+pinChunksCount))
+	t.Run("voucher index count", newItemsCountTest(db.postageIndexIndex, int(gcTarget)+pinChunksCount))
 
 	t.Run("gc index count", newItemsCountTest(db.gcIndex, int(gcTarget)))
 
@@ -299,7 +299,7 @@ func TestGCAfterPin(t *testing.T) {
 
 	t.Run("gc index count", newItemsCountTest(db.gcIndex, int(0)))
 
-	t.Run("postage index count", newItemsCountTest(db.postageIndexIndex, chunkCount))
+	t.Run("voucher index count", newItemsCountTest(db.postageIndexIndex, chunkCount))
 
 	for _, hash := range pinAddrs {
 		_, err := db.Get(context.Background(), storage.ModeGetRequest, hash)
@@ -427,7 +427,7 @@ func TestDB_collectGarbageWorker_withRequests(t *testing.T) {
 
 	t.Run("pull index count", newItemsCountTest(db.pullIndex, int(gcTarget)))
 
-	t.Run("postage index count", newItemsCountTest(db.postageIndexIndex, int(gcTarget)))
+	t.Run("voucher index count", newItemsCountTest(db.postageIndexIndex, int(gcTarget)))
 
 	t.Run("gc index count", newItemsCountTest(db.gcIndex, int(gcTarget)))
 
@@ -892,7 +892,7 @@ func TestGC_NoEvictDirty(t *testing.T) {
 
 	t.Run("pull index count", newItemsCountTest(db.pullIndex, int(gcTarget)))
 
-	t.Run("postage index count", newItemsCountTest(db.postageIndexIndex, int(gcTarget)))
+	t.Run("voucher index count", newItemsCountTest(db.postageIndexIndex, int(gcTarget)))
 
 	t.Run("gc index count", newItemsCountTest(db.gcIndex, int(gcTarget)))
 
@@ -984,7 +984,7 @@ func TestReserveEvictionWorker(t *testing.T) {
 	}))
 
 	t.Cleanup(setWithinRadiusFunc(func(_ *DB, _ shed.Item) bool { return true }))
-	unres := func(f postage.UnreserveIteratorFn) error {
+	unres := func(f voucher.UnreserveIteratorFn) error {
 		mtx.Lock()
 		defer mtx.Unlock()
 		for i := 0; i < len(batchIDs); i++ {
@@ -1070,9 +1070,9 @@ func TestReserveEvictionWorker(t *testing.T) {
 	}
 	t.Run("pull index count", newItemsCountTest(db.pullIndex, chunkCount))
 
-	t.Run("postage index count", newItemsCountTest(db.postageIndexIndex, chunkCount))
+	t.Run("voucher index count", newItemsCountTest(db.postageIndexIndex, chunkCount))
 
-	t.Run("postage radius count", newItemsCountTest(db.postageRadiusIndex, 1))
+	t.Run("voucher radius count", newItemsCountTest(db.postageRadiusIndex, 1))
 
 	t.Run("gc index count", newItemsCountTest(db.gcIndex, 1))
 

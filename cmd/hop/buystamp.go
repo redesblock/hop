@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"github.com/redesblock/hop/core/postage/postagecontract"
+	"github.com/redesblock/hop/core/voucher/vouchercontract"
 	"github.com/spf13/cobra"
 	"io"
 	"math/big"
@@ -44,7 +44,7 @@ func (c *command) initListStampCmd() error {
 func (c *command) initShowStampCmd() error {
 	cmd := &cobra.Command{
 		Use:   "show-stamp id",
-		Short: "get an individual postage batch status",
+		Short: "get an individual voucher batch status",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) (err error) {
 			client := &http.Client{}
@@ -75,7 +75,7 @@ func (c *command) initShowStampCmd() error {
 func (c *command) initBuyStampCmd() error {
 	cmd := &cobra.Command{
 		Use:   "buy-stamp amount depth",
-		Short: "buy a new postage batch.",
+		Short: "buy a new voucher batch.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) (err error) {
 			if _, ok := new(big.Int).SetString(args[0], 10); !ok {
@@ -84,7 +84,7 @@ func (c *command) initBuyStampCmd() error {
 
 			if depth, ok := new(big.Int).SetString(args[1], 10); !ok {
 				return fmt.Errorf("invalid depth")
-			} else if depth.Int64() <= int64(postagecontract.BucketDepth) {
+			} else if depth.Int64() <= int64(vouchercontract.BucketDepth) {
 				return fmt.Errorf("invalid depth")
 			}
 

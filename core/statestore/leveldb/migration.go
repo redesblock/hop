@@ -67,7 +67,7 @@ func migrateBatchstore(s *Store) error {
 }
 
 func migrateStamp(s *Store) error {
-	for _, pfx := range []string{"postage", "batchstore", "addressbook_entry_"} {
+	for _, pfx := range []string{"voucher", "batchstore", "addressbook_entry_"} {
 		collectedKeys, err := collectKeys(s, pfx)
 		if err != nil {
 			return err
@@ -299,7 +299,7 @@ func deleteKeys(s *Store, keys []string) error {
 func (s *Store) Nuke() error {
 	var (
 		keys     []string
-		prefixes = []string{"account", "pseudosettle", "swap", "non-mineable-overlay"}
+		prefixes = []string{"account", "pseudo", "swap", "non-mineable-overlay"}
 		err      error
 	)
 	keys, err = collectKeysExcept(s, prefixes)

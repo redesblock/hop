@@ -16,12 +16,10 @@ import (
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/pingpong"
-	"github.com/redesblock/hop/core/postage"
-	"github.com/redesblock/hop/core/postage/postagecontract"
-	"github.com/redesblock/hop/core/settlement"
-	"github.com/redesblock/hop/core/settlement/swap"
-	"github.com/redesblock/hop/core/settlement/swap/chequebook"
-	"github.com/redesblock/hop/core/settlement/swap/erc20"
+	"github.com/redesblock/hop/core/settle"
+	"github.com/redesblock/hop/core/settle/swap"
+	"github.com/redesblock/hop/core/settle/swap/chequebook"
+	"github.com/redesblock/hop/core/settle/swap/erc20"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
@@ -30,6 +28,8 @@ import (
 	"github.com/redesblock/hop/core/tracing"
 	"github.com/redesblock/hop/core/transaction"
 	"github.com/redesblock/hop/core/traversal"
+	"github.com/redesblock/hop/core/voucher"
+	"github.com/redesblock/hop/core/voucher/vouchercontract"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -54,16 +54,16 @@ type Service struct {
 	tracer             *tracing.Tracer
 	tags               *tags.Tags
 	accounting         account.Interface
-	pseudosettle       settlement.Interface
+	pseudosettle       settle.Interface
 	chequebookEnabled  bool
 	swapEnabled        bool
 	chequebook         chequebook.Service
 	swap               swap.Interface
-	batchStore         postage.Storer
+	batchStore         voucher.Storer
 	transaction        transaction.Service
 	chainBackend       transaction.Backend
-	post               postage.Service
-	postageContract    postagecontract.Interface
+	post               voucher.Service
+	postageContract    vouchercontract.Interface
 	logger             logging.Logger
 	corsAllowedOrigins []string
 	metricsRegistry    *prometheus.Registry
@@ -117,7 +117,7 @@ func New(publicKey, pssPublicKey ecdsa.PublicKey, ethereumAddress common.Address
 // Configure injects required dependencies and configuration parameters and
 // constructs HTTP routes that depend on them. It is intended and safe to call
 // this method only once.
-func (s *Service) Configure(overlay swarm.Address, p2p p2p.DebugService, pingpong pingpong.Interface, topologyDriver topology.Driver, lightNodes *lightnode.Container, storer storage.Storer, tags *tags.Tags, accounting account.Interface, pseudosettle settlement.Interface, swapEnabled bool, chequebookEnabled bool, swap swap.Interface, chequebook chequebook.Service, batchStore postage.Storer, post postage.Service, postageContract postagecontract.Interface, traverser traversal.Traverser, erc20Service erc20.Service) {
+func (s *Service) Configure(overlay swarm.Address, p2p p2p.DebugService, pingpong pingpong.Interface, topologyDriver topology.Driver, lightNodes *lightnode.Container, storer storage.Storer, tags *tags.Tags, accounting account.Interface, pseudosettle settle.Interface, swapEnabled bool, chequebookEnabled bool, swap swap.Interface, chequebook chequebook.Service, batchStore voucher.Storer, post voucher.Service, postageContract vouchercontract.Interface, traverser traversal.Traverser, erc20Service erc20.Service) {
 	s.p2p = p2p
 	s.pingpong = pingpong
 	s.topologyDriver = topologyDriver

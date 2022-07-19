@@ -10,9 +10,9 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/redesblock/hop/core/cac"
 	"github.com/redesblock/hop/core/jsonhttp"
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/soc"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/voucher"
 )
 
 var errBadRequestParams = errors.New("owner, id or span is not well formed")
@@ -125,33 +125,33 @@ func (s *server) socUploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	batch, err := requestPostageBatchId(r)
 	if err != nil {
-		s.logger.Debugf("soc upload: postage batch id: %v", err)
-		s.logger.Error("soc upload: postage batch id")
-		jsonhttp.BadRequest(w, "invalid postage batch id")
+		s.logger.Debugf("soc upload: voucher batch id: %v", err)
+		s.logger.Error("soc upload: voucher batch id")
+		jsonhttp.BadRequest(w, "invalid voucher batch id")
 		return
 	}
 
 	i, err := s.post.GetStampIssuer(batch)
 	if err != nil {
-		s.logger.Debugf("soc upload: postage batch issuer: %v", err)
-		s.logger.Error("soc upload: postage batch issue")
+		s.logger.Debugf("soc upload: voucher batch issuer: %v", err)
+		s.logger.Error("soc upload: voucher batch issue")
 		switch {
-		case errors.Is(err, postage.ErrNotFound):
+		case errors.Is(err, voucher.ErrNotFound):
 			jsonhttp.BadRequest(w, "batch not found")
-		case errors.Is(err, postage.ErrNotUsable):
+		case errors.Is(err, voucher.ErrNotUsable):
 			jsonhttp.BadRequest(w, "batch not usable yet")
 		default:
-			jsonhttp.BadRequest(w, "postage stamp issuer")
+			jsonhttp.BadRequest(w, "voucher stamp issuer")
 		}
 		return
 	}
-	stamper := postage.NewStamper(i, s.signer)
+	stamper := voucher.NewStamper(i, s.signer)
 	stamp, err := stamper.Stamp(sch.Address())
 	if err != nil {
 		s.logger.Debugf("soc upload: stamp: %v", err)
 		s.logger.Error("soc upload: stamp error")
 		switch {
-		case errors.Is(err, postage.ErrBucketFull):
+		case errors.Is(err, voucher.ErrBucketFull):
 			jsonhttp.PaymentRequired(w, "batch is overissued")
 		default:
 			jsonhttp.InternalServerError(w, "stamp error")

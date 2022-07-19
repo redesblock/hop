@@ -14,7 +14,7 @@ import (
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/pricing"
-	"github.com/redesblock/hop/core/settlement/pseudosettle"
+	"github.com/redesblock/hop/core/settle/pseudo"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
 )
@@ -24,7 +24,7 @@ var (
 	balancesPrefix                     = "accounting_balance_"
 	balancesSurplusPrefix              = "accounting_surplusbalance_"
 	balancesOriginatedPrefix           = "accounting_originatedbalance_"
-	// fraction of the refresh rate that is the minimum for monetary settlement
+	// fraction of the refresh rate that is the minimum for monetary settle
 	// this value is chosen so that tiny payments are prevented while still allowing small payments in environments with lower payment thresholds
 	minimumPaymentDivisor    = int64(5)
 	failedSettlementInterval = int64(10) // seconds
@@ -75,10 +75,10 @@ type creditAction struct {
 	applied        bool
 }
 
-// PayFunc is the function used for async monetary settlement
+// PayFunc is the function used for async monetary settle
 type PayFunc func(context.Context, swarm.Address, *big.Int)
 
-// RefreshFunc is the function used for sync time-based settlement
+// RefreshFunc is the function used for sync time-based settle
 type RefreshFunc func(context.Context, swarm.Address, *big.Int, *big.Int) (*big.Int, int64, error)
 
 // accountingPeer holds all in-memory account information for one peer.
@@ -89,7 +89,7 @@ type accountingPeer struct {
 	ghostBalance                   *big.Int   // amount potentially could have been debited for but was not
 	paymentThreshold               *big.Int   // the threshold at which the peer expects us to pay
 	earlyPayment                   *big.Int
-	refreshTimestamp               int64 // last time we attempted time-based settlement
+	refreshTimestamp               int64 // last time we attempted time-based settle
 	paymentOngoing                 bool  // indicate if we are currently settling with the peer
 	lastSettlementFailureTimestamp int64 // time of last unsuccessful attempt to issue a cheque
 	connected                      bool
@@ -111,9 +111,9 @@ type Accounting struct {
 	earlyPayment int64
 	// Limit to disconnect peer after going in debt over
 	disconnectLimit *big.Int
-	// function used for monetary settlement
+	// function used for monetary settle
 	payFunction PayFunc
-	// function used for time settlement
+	// function used for time settle
 	refreshFunction RefreshFunc
 	// allowance based on time used in pseudo settle
 	refreshRate *big.Int
@@ -181,7 +181,7 @@ func (a *Accounting) getIncreasedExpectedDebt(peer swarm.Address, accountingPeer
 	// debt if all reserved operations are successfully credited excluding debt created by surplus balance
 	expectedDebt := new(big.Int).Add(currentDebt, nextReserved)
 
-	// additionalDebt is debt created by incoming payments which we don't consider debt for monetary settlement purposes
+	// additionalDebt is debt created by incoming payments which we don't consider debt for monetary settle purposes
 	additionalDebt, err := a.SurplusBalance(peer)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load surplus balance: %w", err)
@@ -216,7 +216,7 @@ func (a *Accounting) PrepareCredit(peer swarm.Address, price uint64, originated 
 	increasedExpectedDebtReduced := new(big.Int).Sub(increasedExpectedDebt, accountingPeer.shadowReservedBalance)
 
 	// If our expected debt reduced by what could have been credited on the other side already is less than earlyPayment away from our payment threshold
-	// and we are actually in debt, trigger settlement.
+	// and we are actually in debt, trigger settle.
 	// we pay early to avoid needlessly blocking request later when concurrent requests occur and we are already close to the payment threshold.
 
 	if increasedExpectedDebtReduced.Cmp(threshold) >= 0 && currentBalance.Cmp(big.NewInt(0)) < 0 {
@@ -363,18 +363,18 @@ func (a *Accounting) settle(peer swarm.Address, balance *accountingPeer) error {
 
 		acceptedAmount, timestamp, err := a.refreshFunction(context.Background(), peer, paymentAmount, shadowBalance)
 		if err != nil {
-			// if we get settlement too soon it comes from a peer timestamp being ahead of ours, blocking refreshment
+			// if we get settle too soon it comes from a peer timestamp being ahead of ours, blocking refreshment
 			// if we get err peer not found the peer is already disconnected / blocklisted
 			// except for these cases, blocklist peer in case of a failed refreshment
-			if !errors.Is(err, pseudosettle.ErrSettlementTooSoon) && !errors.Is(err, p2p.ErrPeerNotFound) {
+			if !errors.Is(err, pseudo.ErrSettlementTooSoon) && !errors.Is(err, p2p.ErrPeerNotFound) {
 				a.metrics.AccountingDisconnectsEnforceRefreshCount.Inc()
 				_ = a.blocklist(peer, 1, "failed to refresh")
 				return fmt.Errorf("refresh failure: %w", err)
 			} else {
-				// if we get settlement too soon from the peer timestamp being ahead of ours, block payment by returning early
+				// if we get settle too soon from the peer timestamp being ahead of ours, block payment by returning early
 				// this is to disincentivize ahead of time timestamps resulting in more monetary settlements
 				// if err peer not found also fail
-				if errors.Is(err, pseudosettle.ErrSettlementTooSoon) {
+				if errors.Is(err, pseudo.ErrSettlementTooSoon) {
 					a.metrics.AccountingNonFatalRefreshFailCount.Inc()
 				}
 				return fmt.Errorf("refresh failure: %w", err)
@@ -403,7 +403,7 @@ func (a *Accounting) settle(peer swarm.Address, balance *accountingPeer) error {
 		difference := now - balance.lastSettlementFailureTimestamp
 		if difference > failedSettlementInterval {
 
-			// if there is no monetary settlement happening, check if there is something to settle
+			// if there is no monetary settle happening, check if there is something to settle
 			// compute debt excluding debt created by incoming payments
 			originatedBalance, err := a.OriginatedBalance(peer)
 			if err != nil {
@@ -413,7 +413,7 @@ func (a *Accounting) settle(peer swarm.Address, balance *accountingPeer) error {
 			}
 
 			paymentAmount := new(big.Int).Neg(originatedBalance)
-			// if the remaining debt is still larger than some minimum amount, trigger monetary settlement
+			// if the remaining debt is still larger than some minimum amount, trigger monetary settle
 			if paymentAmount.Cmp(a.minimumPayment) >= 0 {
 				balance.paymentOngoing = true
 				// add settled amount to shadow reserve before sending it
@@ -740,7 +740,7 @@ func (a *Accounting) shadowBalance(peer swarm.Address) (shadowBalance *big.Int, 
 	return shadowBalance, nil
 }
 
-// NotifyPaymentSent is triggered by async monetary settlement to update our balance and remove it's price from the shadow reserve
+// NotifyPaymentSent is triggered by async monetary settle to update our balance and remove it's price from the shadow reserve
 func (a *Accounting) NotifyPaymentSent(peer swarm.Address, amount *big.Int, receivedError error) {
 	defer a.wg.Done()
 	accountingPeer := a.getAccountingPeer(peer)
@@ -869,7 +869,7 @@ func (a *Accounting) NotifyPaymentReceived(peer swarm.Address, amount *big.Int) 
 	return nil
 }
 
-// NotifyRefreshmentReceived is called by pseudosettle when we receive a time based settlement.
+// NotifyRefreshmentReceived is called by pseudo when we receive a time based settle.
 func (a *Accounting) NotifyRefreshmentReceived(peer swarm.Address, amount *big.Int) error {
 	accountingPeer := a.getAccountingPeer(peer)
 

@@ -8,11 +8,11 @@ import (
 	"io"
 	"sync"
 
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/sharky"
 	"github.com/redesblock/hop/core/shed"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/voucher"
 )
 
 const (
@@ -57,7 +57,7 @@ func (db *DB) Export(w io.Writer) (count int64, err error) {
 		hdr := &tar.Header{
 			Name: hex.EncodeToString(item.Address),
 			Mode: 0644,
-			Size: int64(postage.StampSize + len(data)),
+			Size: int64(voucher.StampSize + len(data)),
 		}
 
 		if err := tw.WriteHeader(hdr); err != nil {
@@ -147,15 +147,15 @@ func (db *DB) Import(ctx context.Context, r io.Reader) (count int64, err error) 
 				case <-ctx.Done():
 				}
 			}
-			stamp := new(postage.Stamp)
-			err = stamp.UnmarshalBinary(rawdata[:postage.StampSize])
+			stamp := new(voucher.Stamp)
+			err = stamp.UnmarshalBinary(rawdata[:voucher.StampSize])
 			if err != nil {
 				select {
 				case errC <- err:
 				case <-ctx.Done():
 				}
 			}
-			data := rawdata[postage.StampSize:]
+			data := rawdata[voucher.StampSize:]
 			key := swarm.NewAddress(keybytes)
 
 			var ch swarm.Chunk

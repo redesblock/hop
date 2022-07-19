@@ -14,15 +14,15 @@ import (
 	"github.com/redesblock/hop/core/debugapi"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/jsonhttp/jsonhttptest"
-	"github.com/redesblock/hop/core/postage"
-	"github.com/redesblock/hop/core/postage/batchstore/mock"
-	mockpost "github.com/redesblock/hop/core/postage/mock"
-	"github.com/redesblock/hop/core/postage/postagecontract"
-	contractMock "github.com/redesblock/hop/core/postage/postagecontract/mock"
-	postagetesting "github.com/redesblock/hop/core/postage/testing"
 	"github.com/redesblock/hop/core/sctx"
 	"github.com/redesblock/hop/core/transaction/backendmock"
 	"github.com/redesblock/hop/core/util/bigint"
+	"github.com/redesblock/hop/core/voucher"
+	"github.com/redesblock/hop/core/voucher/batchstore/mock"
+	mockpost "github.com/redesblock/hop/core/voucher/mock"
+	postagetesting "github.com/redesblock/hop/core/voucher/testing"
+	"github.com/redesblock/hop/core/voucher/vouchercontract"
+	contractMock "github.com/redesblock/hop/core/voucher/vouchercontract/mock"
 )
 
 func TestPostageCreateStamp(t *testing.T) {
@@ -111,7 +111,7 @@ func TestPostageCreateStamp(t *testing.T) {
 	t.Run("out-of-funds", func(t *testing.T) {
 		contract := contractMock.New(
 			contractMock.WithCreateBatchFunc(func(ctx context.Context, ib *big.Int, d uint8, i bool, l string) ([]byte, error) {
-				return nil, postagecontract.ErrInsufficientFunds
+				return nil, vouchercontract.ErrInsufficientFunds
 			}),
 		)
 		ts := newTestServer(t, testServerOptions{
@@ -140,7 +140,7 @@ func TestPostageCreateStamp(t *testing.T) {
 	t.Run("depth less than bucket depth", func(t *testing.T) {
 		contract := contractMock.New(
 			contractMock.WithCreateBatchFunc(func(ctx context.Context, ib *big.Int, d uint8, i bool, l string) ([]byte, error) {
-				return nil, postagecontract.ErrInvalidDepth
+				return nil, vouchercontract.ErrInvalidDepth
 			}),
 		)
 		ts := newTestServer(t, testServerOptions{
@@ -161,7 +161,7 @@ func TestPostageCreateStamp(t *testing.T) {
 		jsonhttptest.Request(t, ts.Client, http.MethodPost, "/stamps/abcd/2", http.StatusBadRequest,
 			jsonhttptest.WithExpectedJSONResponse(&jsonhttp.StatusResponse{
 				Code:    http.StatusBadRequest,
-				Message: "invalid postage amount",
+				Message: "invalid voucher amount",
 			}),
 		)
 	})
@@ -196,9 +196,9 @@ func TestPostageCreateStamp(t *testing.T) {
 func TestPostageGetStamps(t *testing.T) {
 	b := postagetesting.MustNewBatch()
 	b.Value = big.NewInt(20)
-	si := postage.NewStampIssuer("", "", b.ID, big.NewInt(3), 11, 10, 1000, true)
+	si := voucher.NewStampIssuer("", "", b.ID, big.NewInt(3), 11, 10, 1000, true)
 	mp := mockpost.New(mockpost.WithIssuer(si))
-	cs := &postage.ChainState{Block: 10, TotalAmount: big.NewInt(5), CurrentPrice: big.NewInt(2)}
+	cs := &voucher.ChainState{Block: 10, TotalAmount: big.NewInt(5), CurrentPrice: big.NewInt(2)}
 	bs := mock.New(mock.WithChainState(cs), mock.WithBatch(b))
 	ts := newTestServer(t, testServerOptions{Post: mp, BatchStore: bs})
 
@@ -231,9 +231,9 @@ func TestPostageGetStamps(t *testing.T) {
 func TestGetAllBatches(t *testing.T) {
 	b := postagetesting.MustNewBatch()
 	b.Value = big.NewInt(20)
-	si := postage.NewStampIssuer("", "", b.ID, big.NewInt(3), 11, 10, 1000, true)
+	si := voucher.NewStampIssuer("", "", b.ID, big.NewInt(3), 11, 10, 1000, true)
 	mp := mockpost.New(mockpost.WithIssuer(si))
-	cs := &postage.ChainState{Block: 10, TotalAmount: big.NewInt(5), CurrentPrice: big.NewInt(2)}
+	cs := &voucher.ChainState{Block: 10, TotalAmount: big.NewInt(5), CurrentPrice: big.NewInt(2)}
 	bs := mock.New(mock.WithChainState(cs), mock.WithBatch(b))
 	ts := newTestServer(t, testServerOptions{Post: mp, BatchStore: bs})
 
@@ -265,9 +265,9 @@ func TestGetAllBatches(t *testing.T) {
 func TestPostageGetStamp(t *testing.T) {
 	b := postagetesting.MustNewBatch()
 	b.Value = big.NewInt(20)
-	si := postage.NewStampIssuer("", "", b.ID, big.NewInt(3), 11, 10, 1000, true)
+	si := voucher.NewStampIssuer("", "", b.ID, big.NewInt(3), 11, 10, 1000, true)
 	mp := mockpost.New(mockpost.WithIssuer(si))
-	cs := &postage.ChainState{Block: 10, TotalAmount: big.NewInt(5), CurrentPrice: big.NewInt(2)}
+	cs := &voucher.ChainState{Block: 10, TotalAmount: big.NewInt(5), CurrentPrice: big.NewInt(2)}
 	bs := mock.New(mock.WithChainState(cs), mock.WithBatch(b))
 	ts := newTestServer(t, testServerOptions{Post: mp, BatchStore: bs})
 
@@ -311,7 +311,7 @@ func TestPostageGetStamp(t *testing.T) {
 }
 
 func TestPostageGetBuckets(t *testing.T) {
-	si := postage.NewStampIssuer("", "", batchOk, big.NewInt(3), 11, 10, 1000, true)
+	si := voucher.NewStampIssuer("", "", batchOk, big.NewInt(3), 11, 10, 1000, true)
 	mp := mockpost.New(mockpost.WithIssuer(si))
 	ts := newTestServer(t, testServerOptions{Post: mp})
 	buckets := make([]debugapi.BucketData, 1024)
@@ -354,7 +354,7 @@ func TestPostageGetBuckets(t *testing.T) {
 func TestReserveState(t *testing.T) {
 	t.Run("ok", func(t *testing.T) {
 		ts := newTestServer(t, testServerOptions{
-			BatchStore: mock.New(mock.WithReserveState(&postage.ReserveState{
+			BatchStore: mock.New(mock.WithReserveState(&voucher.ReserveState{
 				Radius: 5,
 			})),
 		})
@@ -377,7 +377,7 @@ func TestReserveState(t *testing.T) {
 func TestChainState(t *testing.T) {
 
 	t.Run("ok", func(t *testing.T) {
-		cs := &postage.ChainState{
+		cs := &voucher.ChainState{
 			Block:        123456,
 			TotalAmount:  big.NewInt(50),
 			CurrentPrice: big.NewInt(5),
@@ -484,7 +484,7 @@ func TestPostageTopUpStamp(t *testing.T) {
 	t.Run("out-of-funds", func(t *testing.T) {
 		contract := contractMock.New(
 			contractMock.WithTopUpBatchFunc(func(ctx context.Context, id []byte, ib *big.Int) error {
-				return postagecontract.ErrInsufficientFunds
+				return vouchercontract.ErrInsufficientFunds
 			}),
 		)
 		ts := newTestServer(t, testServerOptions{
@@ -518,7 +518,7 @@ func TestPostageTopUpStamp(t *testing.T) {
 		jsonhttptest.Request(t, ts.Client, http.MethodPatch, wrongURL, http.StatusBadRequest,
 			jsonhttptest.WithExpectedJSONResponse(&jsonhttp.StatusResponse{
 				Code:    http.StatusBadRequest,
-				Message: "invalid postage amount",
+				Message: "invalid voucher amount",
 			}),
 		)
 	})
@@ -601,7 +601,7 @@ func TestPostageDiluteStamp(t *testing.T) {
 	t.Run("with depth error", func(t *testing.T) {
 		contract := contractMock.New(
 			contractMock.WithDiluteBatchFunc(func(ctx context.Context, id []byte, newDepth uint8) error {
-				return postagecontract.ErrInvalidDepth
+				return vouchercontract.ErrInvalidDepth
 			}),
 		)
 		ts := newTestServer(t, testServerOptions{
@@ -642,7 +642,7 @@ func TestPostageDiluteStamp(t *testing.T) {
 }
 
 // Tests the postageAccessHandler middleware for any set of operations that are guarded
-// by the postage semaphore
+// by the voucher semaphore
 func TestPostageAccessHandler(t *testing.T) {
 
 	type operation struct {

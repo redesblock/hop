@@ -12,7 +12,7 @@ import (
 	"io"
 
 	"github.com/btcsuite/btcd/btcec"
-	"github.com/redesblock/hop/core/bmtpool"
+	bmtpool "github.com/redesblock/hop/core/bmt"
 	"github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/encryption"
 	"github.com/redesblock/hop/core/encryption/elgamal"

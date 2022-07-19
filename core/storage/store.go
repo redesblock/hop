@@ -42,7 +42,7 @@ const (
 	ModeGetRequest ModeGet = iota
 	// ModeGetSync: when accessed for syncing or proof of custody request
 	ModeGetSync
-	// ModeGetLookup: when accessed to lookup a a chunk in feeds or other places
+	// ModeGetLookup: when accessed to lookup a a chunk in pns or other places
 	ModeGetLookup
 	// ModeGetRequestPin represents request for retrieval of pinned chunk.
 	ModeGetRequestPin

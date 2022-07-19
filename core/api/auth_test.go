@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/redesblock/hop/core/api"
-	"github.com/redesblock/hop/core/auth/mock"
+	"github.com/redesblock/hop/core/apikey/mock"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/jsonhttp/jsonhttptest"
 	"github.com/redesblock/hop/core/logging"
@@ -15,7 +15,7 @@ import (
 
 func TestAuth(t *testing.T) {
 	var (
-		resource      = "/auth"
+		resource      = "/apikey"
 		logger        = logging.New(io.Discard, 0)
 		authenticator = &mock.Auth{
 			AuthorizeFunc:   func(string) bool { return true },

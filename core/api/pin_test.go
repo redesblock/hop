@@ -12,13 +12,13 @@ import (
 	"github.com/redesblock/hop/core/jsonhttp/jsonhttptest"
 	"github.com/redesblock/hop/core/logging"
 	pinning "github.com/redesblock/hop/core/pinning/mock"
-	mockpost "github.com/redesblock/hop/core/postage/mock"
 	statestore "github.com/redesblock/hop/core/statestore/mock"
 	"github.com/redesblock/hop/core/storage/mock"
 	testingc "github.com/redesblock/hop/core/storage/testing"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
 	"github.com/redesblock/hop/core/traversal"
+	mockpost "github.com/redesblock/hop/core/voucher/mock"
 )
 
 func checkPinHandlers(t *testing.T, client *http.Client, rootHash string, createPin bool) {

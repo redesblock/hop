@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/shed"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/voucher"
 )
 
 // TestDB_ReserveGC_AllOutOfRadius tests that when all chunks fall outside of
@@ -70,11 +70,11 @@ func TestDB_ReserveGC_AllOutOfRadius(t *testing.T) {
 
 	t.Run("pull index count", newItemsCountTest(db.pullIndex, int(gcTarget)))
 
-	t.Run("postage chunks index count", newItemsCountTest(db.postageChunksIndex, int(gcTarget)))
+	t.Run("voucher chunks index count", newItemsCountTest(db.postageChunksIndex, int(gcTarget)))
 
 	// postageRadiusIndex gets removed only when the batches are called with evict on MaxPO+1
 	// therefore, the expected index count here is larger than one would expect.
-	t.Run("postage radius index count", newItemsCountTest(db.postageRadiusIndex, 0))
+	t.Run("voucher radius index count", newItemsCountTest(db.postageRadiusIndex, 0))
 
 	t.Run("gc index count", newItemsCountTest(db.gcIndex, int(gcTarget)))
 
@@ -126,7 +126,7 @@ func TestDB_ReserveGC_AllWithinRadius(t *testing.T) {
 		unreserveCalled bool
 		mtx             sync.Mutex
 	)
-	unres := func(f postage.UnreserveIteratorFn) error {
+	unres := func(f voucher.UnreserveIteratorFn) error {
 		mtx.Lock()
 		defer mtx.Unlock()
 		unreserveCalled = true
@@ -180,9 +180,9 @@ func TestDB_ReserveGC_AllWithinRadius(t *testing.T) {
 
 	t.Run("pull index count", newItemsCountTest(db.pullIndex, chunkCount))
 
-	t.Run("postage chunks index count", newItemsCountTest(db.postageChunksIndex, chunkCount))
+	t.Run("voucher chunks index count", newItemsCountTest(db.postageChunksIndex, chunkCount))
 
-	t.Run("postage radius index count", newItemsCountTest(db.postageRadiusIndex, 0))
+	t.Run("voucher radius index count", newItemsCountTest(db.postageRadiusIndex, 0))
 
 	t.Run("gc index count", newItemsCountTest(db.gcIndex, 0))
 
@@ -233,7 +233,7 @@ func TestDB_ReserveGC_Unreserve(t *testing.T) {
 		addrs    []swarm.Address
 	)
 
-	unres := func(f postage.UnreserveIteratorFn) error {
+	unres := func(f voucher.UnreserveIteratorFn) error {
 		mtx.Lock()
 		defer mtx.Unlock()
 		for i := 0; i < len(batchIDs); i++ {
@@ -359,11 +359,11 @@ func TestDB_ReserveGC_Unreserve(t *testing.T) {
 	}
 	t.Run("pull index count", newItemsCountTest(db.pullIndex, chunkCount+90-10))
 
-	t.Run("postage chunks index count", newItemsCountTest(db.postageChunksIndex, chunkCount+90-10))
+	t.Run("voucher chunks index count", newItemsCountTest(db.postageChunksIndex, chunkCount+90-10))
 
 	// postageRadiusIndex gets removed only when the batches are called with evict on MaxPO+1
 	// therefore, the expected index count here is larger than one would expect.
-	t.Run("postage radius index count", newItemsCountTest(db.postageRadiusIndex, chunkCount))
+	t.Run("voucher radius index count", newItemsCountTest(db.postageRadiusIndex, chunkCount))
 
 	t.Run("gc index count", newItemsCountTest(db.gcIndex, 90))
 
@@ -423,7 +423,7 @@ func TestDB_ReserveGC_EvictMaxPO(t *testing.T) {
 		}
 	}))
 
-	unres := func(f postage.UnreserveIteratorFn) error {
+	unres := func(f voucher.UnreserveIteratorFn) error {
 		mtx.Lock()
 		defer mtx.Unlock()
 		i := 0
@@ -504,9 +504,9 @@ func TestDB_ReserveGC_EvictMaxPO(t *testing.T) {
 	// although the next 90 chunks exist in the store, their according batch radius
 	// still isn't persisted, since the localstore still is not aware of their
 	// batch radiuses. the same goes for the check after the gc actually evicts the
-	// ten chunks out of the cache (we still expect a zero for postage radius for the
+	// ten chunks out of the cache (we still expect a zero for voucher radius for the
 	// same reason)
-	t.Run("postage radius index count", newItemsCountTest(db.postageRadiusIndex, 0))
+	t.Run("voucher radius index count", newItemsCountTest(db.postageRadiusIndex, 0))
 
 	for i := 0; i < 90; i++ {
 		ch := generateTestRandomChunkAt(swarm.NewAddress(db.baseKey), 2).WithBatch(2, 3, 2, false)
@@ -556,9 +556,9 @@ func TestDB_ReserveGC_EvictMaxPO(t *testing.T) {
 	}
 	t.Run("pull index count", newItemsCountTest(db.pullIndex, chunkCount+90-10))
 
-	t.Run("postage chunks index count", newItemsCountTest(db.postageChunksIndex, chunkCount+90-10))
+	t.Run("voucher chunks index count", newItemsCountTest(db.postageChunksIndex, chunkCount+90-10))
 
-	t.Run("postage radius index count", newItemsCountTest(db.postageRadiusIndex, 0))
+	t.Run("voucher radius index count", newItemsCountTest(db.postageRadiusIndex, 0))
 
 	t.Run("gc index count", newItemsCountTest(db.gcIndex, 90))
 

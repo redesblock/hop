@@ -17,7 +17,7 @@ var (
 	// swap factory address
 	testnetFactoryAddress = common.HexToAddress("0x46934d6027cd3b849Dc94b1947a37a4cA6950b3F")
 	mainnetFactoryAddress = common.HexToAddress("0xc2d5a532cf69aa9a1378737d8ccdef884b6e7420")
-	// postage stamp
+	// voucher stamp
 	testnetPostageStampContractAddress = common.HexToAddress("0xB314052ACd38A66fBDa2a1D43f3AA593c7dd5e24")
 	mainnetPostageStampContractAddress = common.HexToAddress("0x6a1a21eca3ab28be85c7ba22b2d6eae5907c900e")
 	// pledge

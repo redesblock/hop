@@ -10,10 +10,10 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/redesblock/hop/core/cac"
 	"github.com/redesblock/hop/core/jsonhttp"
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
+	"github.com/redesblock/hop/core/voucher"
 )
 
 var successWsMsg = []byte{}
@@ -167,7 +167,7 @@ func (s *server) handleUploadStream(
 			s.logger.Debugf("chunk stream handler: chunk write error: %v, addr %s", err, chunk.Address())
 			s.logger.Error("chunk stream handler: chunk write error")
 			switch {
-			case errors.Is(err, postage.ErrBucketFull):
+			case errors.Is(err, voucher.ErrBucketFull):
 				sendErrorClose(websocket.CloseInternalServerErr, "batch is overissued")
 			default:
 				sendErrorClose(websocket.CloseInternalServerErr, "chunk write error")

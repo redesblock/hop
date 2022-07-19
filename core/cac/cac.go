@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"github.com/redesblock/hop/core/bmtpool"
+	bmtpool "github.com/redesblock/hop/core/bmt"
 	"github.com/redesblock/hop/core/swarm"
 )
 

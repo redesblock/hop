@@ -17,8 +17,6 @@ import (
 	"github.com/redesblock/hop/core/account"
 	"github.com/redesblock/hop/core/account/addressbook"
 	"github.com/redesblock/hop/core/crypto"
-	"github.com/redesblock/hop/core/feeds"
-	"github.com/redesblock/hop/core/feeds/factory"
 	"github.com/redesblock/hop/core/file/joiner"
 	"github.com/redesblock/hop/core/file/loadsave"
 	"github.com/redesblock/hop/core/hive"
@@ -27,12 +25,13 @@ import (
 	"github.com/redesblock/hop/core/netstore"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/p2p/libp2p"
-	"github.com/redesblock/hop/core/postage"
+	"github.com/redesblock/hop/core/pns"
+	"github.com/redesblock/hop/core/pns/factory"
 	"github.com/redesblock/hop/core/pricer"
 	"github.com/redesblock/hop/core/pricing"
 	"github.com/redesblock/hop/core/retrieval"
-	"github.com/redesblock/hop/core/settlement/pseudosettle"
-	"github.com/redesblock/hop/core/settlement/swap/chequebook"
+	"github.com/redesblock/hop/core/settle/pseudo"
+	"github.com/redesblock/hop/core/settle/swap/chequebook"
 	"github.com/redesblock/hop/core/shed"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/storage/inmemstore"
@@ -42,6 +41,7 @@ import (
 	"github.com/redesblock/hop/core/topology/lightnode"
 	"github.com/redesblock/hop/core/tracing"
 	"github.com/redesblock/hop/core/transaction"
+	"github.com/redesblock/hop/core/voucher"
 	"github.com/sirupsen/logrus"
 )
 
@@ -67,7 +67,7 @@ func bootstrapNode(
 	logger logging.Logger,
 	libp2pPrivateKey *ecdsa.PrivateKey,
 	o *Options,
-) (snapshot *postage.ChainSnapshot, retErr error) {
+) (snapshot *voucher.ChainSnapshot, retErr error) {
 
 	tracer, tracerCloser, err := tracing.NewTracer(&tracing.Options{
 		Enabled:     o.TracingEnabled,
@@ -158,9 +158,9 @@ func bootstrapNode(
 	// bootstraper mode uses the light node refresh rate
 	enforcedRefreshRate := big.NewInt(lightRefreshRate)
 
-	pseudosettleService := pseudosettle.New(p2ps, logger, stateStore, acc, enforcedRefreshRate, enforcedRefreshRate, p2ps)
+	pseudosettleService := pseudo.New(p2ps, logger, stateStore, acc, enforcedRefreshRate, enforcedRefreshRate, p2ps)
 	if err = p2ps.AddProtocol(pseudosettleService.Protocol()); err != nil {
-		return nil, fmt.Errorf("pseudosettle service: %w", err)
+		return nil, fmt.Errorf("pseudo service: %w", err)
 	}
 
 	acc.SetRefreshFunc(pseudosettleService.Pay)
@@ -216,7 +216,7 @@ func bootstrapNode(
 		return nil, err
 	}
 
-	events := postage.ChainSnapshot{}
+	events := voucher.ChainSnapshot{}
 	err = json.Unmarshal(eventsJSON, &events)
 	if err != nil {
 		return nil, err
@@ -270,7 +270,7 @@ func getLatestSnapshot(
 
 	var (
 		owner, topic []byte
-		t            = new(feeds.Type)
+		t            = new(pns.Type)
 	)
 	meta := e.Metadata()
 	if e := meta["swarm-feed-owner"]; e != "" {
@@ -294,7 +294,7 @@ func getLatestSnapshot(
 	if len(owner) == 0 || len(topic) == 0 {
 		return swarm.ZeroAddress, fmt.Errorf("node lookup: %s", "feed metadata absent")
 	}
-	f := feeds.New(topic, common.BytesToAddress(owner))
+	f := pns.New(topic, common.BytesToAddress(owner))
 
 	l, err := feedFactory.NewLookup(*t, f)
 	if err != nil {
@@ -306,7 +306,7 @@ func getLatestSnapshot(
 		return swarm.ZeroAddress, err
 	}
 
-	_, ref, err := feeds.FromChunk(u)
+	_, ref, err := pns.FromChunk(u)
 	if err != nil {
 		return swarm.ZeroAddress, err
 	}

@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/hashicorp/go-multierror"
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/sharky"
 	"github.com/redesblock/hop/core/shed"
+	"github.com/redesblock/hop/core/voucher"
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
@@ -24,7 +24,7 @@ func migrateSharky(db *DB) error {
 		batch          = new(leveldb.Batch)
 		batchSize      = 10000
 		batchesCount   = 0
-		headerSize     = 16 + postage.StampSize
+		headerSize     = 16 + voucher.StampSize
 		compactionRate = 100
 		compactionSize = batchSize * compactionRate
 	)
@@ -49,7 +49,7 @@ func migrateSharky(db *DB) error {
 			b := make([]byte, headerSize)
 			binary.BigEndian.PutUint64(b[:8], fields.BinID)
 			binary.BigEndian.PutUint64(b[8:16], uint64(fields.StoreTimestamp))
-			stamp, err := postage.NewStamp(fields.BatchID, fields.Index, fields.Timestamp, fields.Sig).MarshalBinary()
+			stamp, err := voucher.NewStamp(fields.BatchID, fields.Index, fields.Timestamp, fields.Sig).MarshalBinary()
 			if err != nil {
 				return nil, err
 			}
@@ -60,7 +60,7 @@ func migrateSharky(db *DB) error {
 		DecodeValue: func(keyItem shed.Item, value []byte) (e shed.Item, err error) {
 			e.StoreTimestamp = int64(binary.BigEndian.Uint64(value[8:16]))
 			e.BinID = binary.BigEndian.Uint64(value[:8])
-			stamp := new(postage.Stamp)
+			stamp := new(voucher.Stamp)
 			if err = stamp.UnmarshalBinary(value[16:headerSize]); err != nil {
 				return e, err
 			}
@@ -88,7 +88,7 @@ func migrateSharky(db *DB) error {
 			b := make([]byte, headerSize)
 			binary.BigEndian.PutUint64(b[:8], fields.BinID)
 			binary.BigEndian.PutUint64(b[8:16], uint64(fields.StoreTimestamp))
-			stamp, err := postage.NewStamp(fields.BatchID, fields.Index, fields.Timestamp, fields.Sig).MarshalBinary()
+			stamp, err := voucher.NewStamp(fields.BatchID, fields.Index, fields.Timestamp, fields.Sig).MarshalBinary()
 			if err != nil {
 				return nil, err
 			}
@@ -99,7 +99,7 @@ func migrateSharky(db *DB) error {
 		DecodeValue: func(keyItem shed.Item, value []byte) (e shed.Item, err error) {
 			e.StoreTimestamp = int64(binary.BigEndian.Uint64(value[8:16]))
 			e.BinID = binary.BigEndian.Uint64(value[:8])
-			stamp := new(postage.Stamp)
+			stamp := new(voucher.Stamp)
 			if err = stamp.UnmarshalBinary(value[16:headerSize]); err != nil {
 				return e, err
 			}

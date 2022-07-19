@@ -9,12 +9,12 @@ import (
 
 	"github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/logging"
-	"github.com/redesblock/hop/core/postage"
-	postagetesting "github.com/redesblock/hop/core/postage/testing"
 	"github.com/redesblock/hop/core/pss"
 	"github.com/redesblock/hop/core/pushsync"
 	pushsyncmock "github.com/redesblock/hop/core/pushsync/mock"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/voucher"
+	postagetesting "github.com/redesblock/hop/core/voucher/testing"
 )
 
 // TestSend creates a trojan chunk and sends it using push sync
@@ -230,6 +230,6 @@ func ensureCalls(t *testing.T, calls *int, exp int) {
 
 type stamper struct{}
 
-func (s *stamper) Stamp(_ swarm.Address) (*postage.Stamp, error) {
+func (s *stamper) Stamp(_ swarm.Address) (*voucher.Stamp, error) {
 	return postagetesting.MustNewStamp(), nil
 }

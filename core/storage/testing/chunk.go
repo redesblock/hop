@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/redesblock/hop/core/cac"
-	postagetesting "github.com/redesblock/hop/core/postage/testing"
 	"github.com/redesblock/hop/core/swarm"
 	swarmtesting "github.com/redesblock/hop/core/swarm/test"
+	postagetesting "github.com/redesblock/hop/core/voucher/testing"
 )
 
 var mockStamp swarm.Stamp

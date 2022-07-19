@@ -7,7 +7,7 @@ import (
 
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
-	"github.com/redesblock/hop/core/auth"
+	"github.com/redesblock/hop/core/apikey"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/logging/httpaccess"
 	"github.com/redesblock/hop/core/swarm"
@@ -26,7 +26,7 @@ func (s *server) setupRouting() {
 	// handle is a helper closure which simplifies the router setup.
 	handle := func(path string, handler http.Handler) {
 		if s.Restricted {
-			handler = web.ChainHandlers(auth.PermissionCheckHandler(s.auth), web.FinalHandler(handler))
+			handler = web.ChainHandlers(apikey.PermissionCheckHandler(s.auth), web.FinalHandler(handler))
 		}
 		router.Handle(path, handler)
 		router.Handle(rootPath+path, handler)
@@ -43,16 +43,16 @@ func (s *server) setupRouting() {
 	})
 
 	if s.Restricted {
-		router.Handle("/auth", jsonhttp.MethodHandler{
+		router.Handle("/apikey", jsonhttp.MethodHandler{
 			"POST": web.ChainHandlers(
-				s.newTracingHandler("auth"),
+				s.newTracingHandler("apikey"),
 				jsonhttp.NewMaxBodyBytesHandler(512),
 				web.FinalHandlerFunc(s.authHandler),
 			),
 		})
 		router.Handle("/refresh", jsonhttp.MethodHandler{
 			"POST": web.ChainHandlers(
-				s.newTracingHandler("auth"),
+				s.newTracingHandler("apikey"),
 				jsonhttp.NewMaxBodyBytesHandler(512),
 				web.FinalHandlerFunc(s.refreshHandler),
 			),
@@ -97,7 +97,7 @@ func (s *server) setupRouting() {
 		),
 	})
 
-	handle("/feeds/{owner}/{topic}", jsonhttp.MethodHandler{
+	handle("/pns/{owner}/{topic}", jsonhttp.MethodHandler{
 		"GET": http.HandlerFunc(s.feedGetHandler),
 		"POST": web.ChainHandlers(
 			jsonhttp.NewMaxBodyBytesHandler(swarm.ChunkWithSpanSize),

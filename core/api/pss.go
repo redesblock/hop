@@ -15,9 +15,9 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/jsonhttp"
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/pss"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/voucher"
 )
 
 const (
@@ -77,33 +77,33 @@ func (s *server) pssPostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	batch, err := requestPostageBatchId(r)
 	if err != nil {
-		s.logger.Debugf("pss: postage batch id: %v", err)
-		s.logger.Error("pss: postage batch id")
-		jsonhttp.BadRequest(w, "invalid postage batch id")
+		s.logger.Debugf("pss: voucher batch id: %v", err)
+		s.logger.Error("pss: voucher batch id")
+		jsonhttp.BadRequest(w, "invalid voucher batch id")
 		return
 	}
 	i, err := s.post.GetStampIssuer(batch)
 	if err != nil {
-		s.logger.Debugf("pss: postage batch issuer: %v", err)
-		s.logger.Error("pss: postage batch issue")
+		s.logger.Debugf("pss: voucher batch issuer: %v", err)
+		s.logger.Error("pss: voucher batch issue")
 		switch {
-		case errors.Is(err, postage.ErrNotFound):
+		case errors.Is(err, voucher.ErrNotFound):
 			jsonhttp.BadRequest(w, "batch not found")
-		case errors.Is(err, postage.ErrNotUsable):
+		case errors.Is(err, voucher.ErrNotUsable):
 			jsonhttp.BadRequest(w, "batch not usable yet")
 		default:
-			jsonhttp.BadRequest(w, "postage stamp issuer")
+			jsonhttp.BadRequest(w, "voucher stamp issuer")
 		}
 		return
 	}
-	stamper := postage.NewStamper(i, s.signer)
+	stamper := voucher.NewStamper(i, s.signer)
 
 	err = s.pss.Send(r.Context(), topic, payload, stamper, recipient, targets)
 	if err != nil {
 		s.logger.Debugf("pss send payload: %v. topic: %s", err, topicVar)
 		s.logger.Error("pss send payload")
 		switch {
-		case errors.Is(err, postage.ErrBucketFull):
+		case errors.Is(err, voucher.ErrBucketFull):
 			jsonhttp.PaymentRequired(w, "batch is overissued")
 		default:
 			jsonhttp.InternalServerError(w, nil)

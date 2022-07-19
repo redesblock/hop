@@ -10,8 +10,8 @@ import (
 	"github.com/redesblock/hop/core/debugapi"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/jsonhttp/jsonhttptest"
-	"github.com/redesblock/hop/core/settlement"
-	"github.com/redesblock/hop/core/settlement/swap/mock"
+	"github.com/redesblock/hop/core/settle"
+	"github.com/redesblock/hop/core/settle/swap/mock"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/util/bigint"
 )
@@ -116,7 +116,7 @@ func TestSettlementsPeersNoSettlements(t *testing.T) {
 		return big.NewInt(1000000000000000000), nil
 	}
 	errFunc := func(swarm.Address) (*big.Int, error) {
-		return nil, settlement.ErrPeerNoSettlements
+		return nil, settle.ErrPeerNoSettlements
 	}
 
 	t.Run("no sent", func(t *testing.T) {

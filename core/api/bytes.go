@@ -8,11 +8,11 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/redesblock/hop/core/jsonhttp"
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/sctx"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
 	"github.com/redesblock/hop/core/tracing"
+	"github.com/redesblock/hop/core/voucher"
 )
 
 type bytesPostResponse struct {
@@ -60,7 +60,7 @@ func (s *server) bytesUploadHandler(w http.ResponseWriter, r *http.Request) {
 		logger.Debugf("bytes upload: split write all: %v", err)
 		logger.Error("bytes upload: split write all")
 		switch {
-		case errors.Is(err, postage.ErrBucketFull):
+		case errors.Is(err, voucher.ErrBucketFull):
 			jsonhttp.PaymentRequired(w, "batch is overissued")
 		default:
 			jsonhttp.InternalServerError(w, nil)

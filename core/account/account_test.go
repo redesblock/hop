@@ -373,7 +373,7 @@ func TestAccountingDisconnect(t *testing.T) {
 	}
 }
 
-// TestAccountingCallSettlement tests that settlement is called correctly if the payment threshold is hit
+// TestAccountingCallSettlement tests that settle is called correctly if the payment threshold is hit
 func TestAccountingCallSettlement(t *testing.T) {
 	logger := logging.New(io.Discard, 0)
 
@@ -439,7 +439,7 @@ func TestAccountingCallSettlement(t *testing.T) {
 	}
 
 	if acc.IsPaymentOngoing(peer1Addr) {
-		t.Fatal("triggered monetary settlement")
+		t.Fatal("triggered monetary settle")
 	}
 
 	creditAction.Cleanup()
@@ -472,7 +472,7 @@ func TestAccountingCallSettlement(t *testing.T) {
 
 	creditAction.Cleanup()
 
-	// try another request to trigger settlement
+	// try another request to trigger settle
 	creditAction, err = acc.PrepareCredit(peer1Addr, 1, true)
 	if err != nil {
 		t.Fatal(err)
@@ -493,7 +493,7 @@ func TestAccountingCallSettlement(t *testing.T) {
 	}
 
 	if acc.IsPaymentOngoing(peer1Addr) {
-		t.Fatal("triggered monetary settlement")
+		t.Fatal("triggered monetary settle")
 	}
 	creditActionLong.Cleanup()
 }
@@ -755,7 +755,7 @@ func TestAccountingCallSettlementTooSoon(t *testing.T) {
 	}
 }
 
-// TestAccountingCallSettlementEarly tests that settlement is called correctly if the payment threshold minus early payment is hit
+// TestAccountingCallSettlementEarly tests that settle is called correctly if the payment threshold minus early payment is hit
 func TestAccountingCallSettlementEarly(t *testing.T) {
 	logger := logging.New(io.Discard, 0)
 

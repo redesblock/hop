@@ -12,17 +12,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/redesblock/hop/core/bitvector"
 	"github.com/redesblock/hop/core/cac"
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/p2p/protobuf"
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/pullsync/pb"
 	"github.com/redesblock/hop/core/pullsync/pullstorage"
 	"github.com/redesblock/hop/core/soc"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/util/bitvector"
+	"github.com/redesblock/hop/core/voucher"
 )
 
 const (
@@ -70,7 +70,7 @@ type Syncer struct {
 	quit       chan struct{}
 	wg         sync.WaitGroup
 	unwrap     func(swarm.Chunk)
-	validStamp postage.ValidStampFn
+	validStamp voucher.ValidStampFn
 
 	ruidMtx sync.Mutex
 	ruidCtx map[string]map[uint32]func()
@@ -79,7 +79,7 @@ type Syncer struct {
 	io.Closer
 }
 
-func New(streamer p2p.Streamer, storage pullstorage.Storer, unwrap func(swarm.Chunk), validStamp postage.ValidStampFn, logger logging.Logger) *Syncer {
+func New(streamer p2p.Streamer, storage pullstorage.Storer, unwrap func(swarm.Chunk), validStamp voucher.ValidStampFn, logger logging.Logger) *Syncer {
 	return &Syncer{
 		streamer:   streamer,
 		storage:    storage,

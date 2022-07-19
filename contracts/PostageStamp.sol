@@ -9,7 +9,7 @@ import "./Ownable.sol";
 
 /**
  * @title PostageStamp contract
- * @dev The postage stamp contracts allows users to create and manage postage stamp batches.
+ * @dev The voucher stamp contracts allows users to create and manage voucher stamp batches.
  */
 contract PostageStamp is AccessControl, Pausable, Ownable {
     using SafeMath for uint256;

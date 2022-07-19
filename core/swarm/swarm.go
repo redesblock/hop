@@ -139,9 +139,9 @@ type Chunk interface {
 	TagID() uint32
 	// WithTagID attaches the tag ID to the chunk.
 	WithTagID(t uint32) Chunk
-	// Stamp returns the postage stamp associated with this chunk.
+	// Stamp returns the voucher stamp associated with this chunk.
 	Stamp() Stamp
-	// WithStamp attaches a postage stamp to the chunk.
+	// WithStamp attaches a voucher stamp to the chunk.
 	WithStamp(Stamp) Chunk
 	// Radius is the PO above which the batch is preserved.
 	Radius() uint8
@@ -157,7 +157,7 @@ type Chunk interface {
 	Equal(Chunk) bool
 }
 
-// Stamp interface for postage.Stamp to avoid circular dependency
+// Stamp interface for voucher.Stamp to avoid circular dependency
 type Stamp interface {
 	BatchID() []byte
 	Index() []byte

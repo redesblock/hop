@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/shed"
 	"github.com/redesblock/hop/core/storage"
+	"github.com/redesblock/hop/core/voucher"
 )
 
 // TestModeGetRequest validates ModeGetRequest index values on the provided DB.
@@ -89,7 +89,7 @@ func TestModeGetRequest(t *testing.T) {
 
 		t.Run("retrieve indexes", newRetrieveIndexesTestWithAccess(db, ch, uploadTimestamp, uploadTimestamp))
 
-		t.Run("gc index", newGCIndexTest(db, ch, uploadTimestamp, uploadTimestamp, 1, nil, postage.NewStamp(ch.Stamp().BatchID(), nil, nil, nil)))
+		t.Run("gc index", newGCIndexTest(db, ch, uploadTimestamp, uploadTimestamp, 1, nil, voucher.NewStamp(ch.Stamp().BatchID(), nil, nil, nil)))
 
 		t.Run("access count", newItemsCountTest(db.retrievalAccessIndex, 1))
 		t.Run("gc index count", newItemsCountTest(db.gcIndex, 1))
@@ -120,7 +120,7 @@ func TestModeGetRequest(t *testing.T) {
 
 		t.Run("retrieve indexes", newRetrieveIndexesTestWithAccess(db, ch, uploadTimestamp, accessTimestamp))
 
-		t.Run("gc index", newGCIndexTest(db, ch, uploadTimestamp, accessTimestamp, 1, nil, postage.NewStamp(ch.Stamp().BatchID(), nil, nil, nil)))
+		t.Run("gc index", newGCIndexTest(db, ch, uploadTimestamp, accessTimestamp, 1, nil, voucher.NewStamp(ch.Stamp().BatchID(), nil, nil, nil)))
 
 		t.Run("access count", newItemsCountTest(db.retrievalAccessIndex, 1))
 		t.Run("gc index count", newItemsCountTest(db.gcIndex, 1))
@@ -146,7 +146,7 @@ func TestModeGetRequest(t *testing.T) {
 
 		t.Run("retrieve indexes", newRetrieveIndexesTestWithAccess(db, ch, uploadTimestamp, uploadTimestamp))
 
-		t.Run("gc index", newGCIndexTest(db, ch, uploadTimestamp, uploadTimestamp, 1, nil, postage.NewStamp(ch.Stamp().BatchID(), nil, nil, nil)))
+		t.Run("gc index", newGCIndexTest(db, ch, uploadTimestamp, uploadTimestamp, 1, nil, voucher.NewStamp(ch.Stamp().BatchID(), nil, nil, nil)))
 
 		t.Run("gc index count", newItemsCountTest(db.gcIndex, 1))
 

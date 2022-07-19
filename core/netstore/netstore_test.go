@@ -12,12 +12,12 @@ import (
 
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/netstore"
-	"github.com/redesblock/hop/core/postage"
-	postagetesting "github.com/redesblock/hop/core/postage/testing"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/storage/mock"
 	chunktesting "github.com/redesblock/hop/core/storage/testing"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/voucher"
+	postagetesting "github.com/redesblock/hop/core/voucher/testing"
 )
 
 var testChunk = chunktesting.GenerateTestRandomChunk()
@@ -139,7 +139,7 @@ func TestInvalidChunkNetstoreRetrieval(t *testing.T) {
 
 func TestInvalidPostageStamp(t *testing.T) {
 	f := func(c swarm.Chunk, _ []byte) (swarm.Chunk, error) {
-		return nil, errors.New("invalid postage stamp")
+		return nil, errors.New("invalid voucher stamp")
 	}
 	retrieve, store, nstore := newRetrievingNetstore(t, f)
 	addr := testChunk.Address()
@@ -201,7 +201,7 @@ func waitAndGetChunk(t *testing.T, store storage.Storer, addr swarm.Address, mod
 }
 
 // returns a mock retrieval protocol, a mock local storage and a netstore
-func newRetrievingNetstore(t *testing.T, validStamp postage.ValidStampFn) (ret *retrievalMock, mockStore *mock.MockStorer, ns storage.Storer) {
+func newRetrievingNetstore(t *testing.T, validStamp voucher.ValidStampFn) (ret *retrievalMock, mockStore *mock.MockStorer, ns storage.Storer) {
 	retrieve := &retrievalMock{}
 	store := mock.NewStorer()
 	logger := logging.New(io.Discard, 0)

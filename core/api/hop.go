@@ -17,17 +17,17 @@ import (
 	"github.com/gorilla/mux"
 
 	"github.com/ethersphere/langos"
-	"github.com/redesblock/hop/core/feeds"
 	"github.com/redesblock/hop/core/file/joiner"
 	"github.com/redesblock/hop/core/file/loadsave"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/manifest"
-	"github.com/redesblock/hop/core/postage"
+	"github.com/redesblock/hop/core/pns"
 	"github.com/redesblock/hop/core/sctx"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
 	"github.com/redesblock/hop/core/tracing"
+	"github.com/redesblock/hop/core/voucher"
 )
 
 func (s *server) hopUploadHandler(w http.ResponseWriter, r *http.Request) {
@@ -47,9 +47,9 @@ func (s *server) hopUploadHandler(w http.ResponseWriter, r *http.Request) {
 		logger.Debugf("hop upload: putter: %v", err)
 		logger.Error("hop upload: putter")
 		switch {
-		case errors.Is(err, postage.ErrNotFound):
+		case errors.Is(err, voucher.ErrNotFound):
 			jsonhttp.BadRequest(w, "batch not found")
-		case errors.Is(err, postage.ErrNotUsable):
+		case errors.Is(err, voucher.ErrNotUsable):
 			jsonhttp.BadRequest(w, "batch not usable yet")
 		default:
 			jsonhttp.BadRequest(w, nil)
@@ -117,7 +117,7 @@ func (s *server) fileUploadHandler(w http.ResponseWriter, r *http.Request, store
 		logger.Debugf("hop upload file: file store, file %q: %v", fileName, err)
 		logger.Errorf("hop upload file: file store, file %q", fileName)
 		switch {
-		case errors.Is(err, postage.ErrBucketFull):
+		case errors.Is(err, voucher.ErrBucketFull):
 			jsonhttp.PaymentRequired(w, "batch is overissued")
 		default:
 			jsonhttp.InternalServerError(w, errFileStore)
@@ -190,7 +190,7 @@ func (s *server) fileUploadHandler(w http.ResponseWriter, r *http.Request, store
 		logger.Debugf("hop upload file: manifest store, file %q: %v", fileName, err)
 		logger.Errorf("hop upload file: manifest store, file %q", fileName)
 		switch {
-		case errors.Is(err, postage.ErrBucketFull):
+		case errors.Is(err, voucher.ErrBucketFull):
 			jsonhttp.PaymentRequired(w, "batch is overissued")
 		default:
 			jsonhttp.InternalServerError(w, nil)
@@ -473,14 +473,14 @@ func manifestMetadataLoad(
 func (s *server) manifestFeed(
 	ctx context.Context,
 	m manifest.Interface,
-) (feeds.Lookup, error) {
+) (pns.Lookup, error) {
 	e, err := m.Lookup(ctx, "/")
 	if err != nil {
 		return nil, fmt.Errorf("node lookup: %w", err)
 	}
 	var (
 		owner, topic []byte
-		t            = new(feeds.Type)
+		t            = new(pns.Type)
 	)
 	meta := e.Metadata()
 	if e := meta[feedMetadataEntryOwner]; e != "" {
@@ -504,7 +504,7 @@ func (s *server) manifestFeed(
 	if len(owner) == 0 || len(topic) == 0 {
 		return nil, fmt.Errorf("node lookup: %s", "feed metadata absent")
 	}
-	f := feeds.New(topic, common.BytesToAddress(owner))
+	f := pns.New(topic, common.BytesToAddress(owner))
 	return s.feedFactory.NewLookup(*t, f)
 }
 

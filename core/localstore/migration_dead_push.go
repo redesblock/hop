@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/shed"
+	"github.com/redesblock/hop/core/voucher"
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
@@ -19,7 +19,7 @@ func migrateDeadPush(db *DB) error {
 	db.logger.Debug("removing dangling entries from push index")
 	batch := new(leveldb.Batch)
 	count := 0
-	headerSize := 16 + postage.StampSize
+	headerSize := 16 + voucher.StampSize
 	retrievalDataIndex, err := db.shed.NewIndex("Address->StoreTimestamp|BinID|BatchID|BatchIndex|Sig|Data", shed.IndexFuncs{
 		EncodeKey: func(fields shed.Item) (key []byte, err error) {
 			return fields.Address, nil
@@ -32,7 +32,7 @@ func migrateDeadPush(db *DB) error {
 			b := make([]byte, headerSize)
 			binary.BigEndian.PutUint64(b[:8], fields.BinID)
 			binary.BigEndian.PutUint64(b[8:16], uint64(fields.StoreTimestamp))
-			stamp, err := postage.NewStamp(fields.BatchID, fields.Index, fields.Timestamp, fields.Sig).MarshalBinary()
+			stamp, err := voucher.NewStamp(fields.BatchID, fields.Index, fields.Timestamp, fields.Sig).MarshalBinary()
 			if err != nil {
 				return nil, err
 			}
@@ -43,7 +43,7 @@ func migrateDeadPush(db *DB) error {
 		DecodeValue: func(keyItem shed.Item, value []byte) (e shed.Item, err error) {
 			e.StoreTimestamp = int64(binary.BigEndian.Uint64(value[8:16]))
 			e.BinID = binary.BigEndian.Uint64(value[:8])
-			stamp := new(postage.Stamp)
+			stamp := new(voucher.Stamp)
 			if err = stamp.UnmarshalBinary(value[16:headerSize]); err != nil {
 				return e, err
 			}

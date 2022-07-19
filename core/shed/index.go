@@ -30,14 +30,14 @@ type Item struct {
 	BinID           uint64
 	PinCounter      uint64 // maintains the no of time a chunk is pinned
 	Tag             uint32
-	BatchID         []byte // postage batch ID
-	Index           []byte // postage stamp within-batch: index
-	Timestamp       []byte // postage stamp validity
-	Sig             []byte // postage stamp signature
-	BucketDepth     uint8  // postage batch bucket depth (for collision sets)
-	Depth           uint8  // postage batch depth (for size)
-	Radius          uint8  // postage batch reserve radius, po upto and excluding which chunks are unpinned
-	Immutable       bool   // whether postage batch can be diluted and drained, and indexes overwritten - nullable bool
+	BatchID         []byte // voucher batch ID
+	Index           []byte // voucher stamp within-batch: index
+	Timestamp       []byte // voucher stamp validity
+	Sig             []byte // voucher stamp signature
+	BucketDepth     uint8  // voucher batch bucket depth (for collision sets)
+	Depth           uint8  // voucher batch depth (for size)
+	Radius          uint8  // voucher batch reserve radius, po upto and excluding which chunks are unpinned
+	Immutable       bool   // whether voucher batch can be diluted and drained, and indexes overwritten - nullable bool
 }
 
 // Merge is a helper method to construct a new
