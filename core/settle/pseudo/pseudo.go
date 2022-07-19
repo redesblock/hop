@@ -9,13 +9,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/p2p/protobuf"
 	"github.com/redesblock/hop/core/settle"
 	pb "github.com/redesblock/hop/core/settle/pseudo/pb"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 const (

@@ -8,8 +8,8 @@ import (
 	"hash"
 	"math/big"
 
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/storage"
+	"github.com/redesblock/hop/core/util/logging"
 	"github.com/redesblock/hop/core/voucher"
 	"golang.org/x/crypto/sha3"
 )

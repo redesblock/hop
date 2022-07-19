@@ -6,7 +6,7 @@ package main
 import (
 	"errors"
 
-	"github.com/redesblock/hop/core/logging"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 func isWindowsService() (bool, error) {

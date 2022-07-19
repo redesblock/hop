@@ -10,7 +10,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/redesblock/hop/core/crypto"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/settle/swap"
 	"github.com/redesblock/hop/core/settle/swap/chequebook"
 	mockchequebook "github.com/redesblock/hop/core/settle/swap/chequebook/mock"
@@ -18,6 +17,7 @@ import (
 	"github.com/redesblock/hop/core/settle/swap/swapprotocol"
 	mockstore "github.com/redesblock/hop/core/statestore/mock"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 type swapProtocolMock struct {

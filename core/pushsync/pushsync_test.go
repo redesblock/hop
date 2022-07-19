@@ -14,7 +14,6 @@ import (
 	accountingmock "github.com/redesblock/hop/core/account/mock"
 	"github.com/redesblock/hop/core/crypto"
 	cryptomock "github.com/redesblock/hop/core/crypto/mock"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/p2p/protobuf"
 	"github.com/redesblock/hop/core/p2p/streamtest"
@@ -29,6 +28,7 @@ import (
 	"github.com/redesblock/hop/core/tags"
 	"github.com/redesblock/hop/core/topology"
 	"github.com/redesblock/hop/core/topology/mock"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 const (

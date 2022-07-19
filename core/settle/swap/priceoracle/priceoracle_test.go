@@ -8,10 +8,10 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/settle/swap/priceoracle"
 	"github.com/redesblock/hop/core/transaction"
 	transactionmock "github.com/redesblock/hop/core/transaction/mock"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 var (

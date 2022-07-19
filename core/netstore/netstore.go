@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/redesblock/hop/core/cac"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/retrieval"
 	"github.com/redesblock/hop/core/soc"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/util/logging"
 	"github.com/redesblock/hop/core/voucher"
 )
 

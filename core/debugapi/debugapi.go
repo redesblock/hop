@@ -13,7 +13,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redesblock/hop/core/account"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/pingpong"
 	"github.com/redesblock/hop/core/settle"
@@ -28,6 +27,7 @@ import (
 	"github.com/redesblock/hop/core/tracing"
 	"github.com/redesblock/hop/core/transaction"
 	"github.com/redesblock/hop/core/traversal"
+	"github.com/redesblock/hop/core/util/logging"
 	"github.com/redesblock/hop/core/voucher"
 	"github.com/redesblock/hop/core/voucher/vouchercontract"
 	"golang.org/x/sync/semaphore"

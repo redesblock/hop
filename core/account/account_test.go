@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/redesblock/hop/core/account"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	p2pmock "github.com/redesblock/hop/core/p2p/mock"
 	"github.com/redesblock/hop/core/statestore/mock"
+	"github.com/redesblock/hop/core/util/logging"
 
 	"github.com/redesblock/hop/core/swarm"
 )

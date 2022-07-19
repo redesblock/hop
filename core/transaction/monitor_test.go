@@ -8,9 +8,9 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/transaction"
 	"github.com/redesblock/hop/core/transaction/backendsimulation"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 func TestMonitorWatchTransaction(t *testing.T) {

@@ -10,7 +10,7 @@ import (
 	"github.com/redesblock/hop/core/apikey/mock"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/jsonhttp/jsonhttptest"
-	"github.com/redesblock/hop/core/logging"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 func TestAuth(t *testing.T) {

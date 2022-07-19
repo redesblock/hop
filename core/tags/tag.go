@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/opentracing/opentracing-go"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tracing"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 var (

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/util/logging"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"

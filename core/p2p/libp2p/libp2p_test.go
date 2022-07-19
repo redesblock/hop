@@ -13,12 +13,12 @@ import (
 	"github.com/multiformats/go-multiaddr"
 	"github.com/redesblock/hop/core/account/addressbook"
 	"github.com/redesblock/hop/core/crypto"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/p2p/libp2p"
 	"github.com/redesblock/hop/core/statestore/mock"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/topology/lightnode"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 type libp2pServiceOpts struct {

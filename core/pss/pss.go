@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/pushsync"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/util/logging"
 	"github.com/redesblock/hop/core/voucher"
 )
 

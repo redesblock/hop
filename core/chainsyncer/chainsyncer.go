@@ -13,11 +13,11 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/redesblock/hop/core/blocker"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/topology"
 	"github.com/redesblock/hop/core/transaction"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 const (

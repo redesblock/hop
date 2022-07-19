@@ -11,11 +11,11 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/redesblock/hop/core/chainsyncer"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/topology/mock"
 	"github.com/redesblock/hop/core/transaction/backendmock"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 func TestChainsyncer(t *testing.T) {

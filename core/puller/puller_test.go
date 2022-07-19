@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/redesblock/hop/core/intervalstore"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/puller"
 	mockps "github.com/redesblock/hop/core/pullsync/mock"
 	"github.com/redesblock/hop/core/statestore/mock"
@@ -16,6 +15,7 @@ import (
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/swarm/test"
 	mockk "github.com/redesblock/hop/core/topology/kademlia/mock"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 const max = math.MaxUint64

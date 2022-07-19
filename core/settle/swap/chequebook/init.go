@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/sctx"
 	"github.com/redesblock/hop/core/settle/swap/erc20"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/transaction"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 const (

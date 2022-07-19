@@ -8,12 +8,12 @@ import (
 	"io"
 	"time"
 
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/p2p/protobuf"
 	"github.com/redesblock/hop/core/pingpong/pb"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tracing"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 const (

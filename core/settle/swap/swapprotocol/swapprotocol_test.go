@@ -12,7 +12,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/p2p/protobuf"
 	"github.com/redesblock/hop/core/p2p/streamtest"
@@ -22,6 +21,7 @@ import (
 	"github.com/redesblock/hop/core/settle/swap/swapprotocol"
 	"github.com/redesblock/hop/core/settle/swap/swapprotocol/pb"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 func TestEmitCheques(t *testing.T) {

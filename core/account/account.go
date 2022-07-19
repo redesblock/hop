@@ -11,12 +11,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/pricing"
 	"github.com/redesblock/hop/core/settle/pseudo"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 var (

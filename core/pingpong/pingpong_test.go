@@ -11,12 +11,12 @@ import (
 
 	"github.com/redesblock/hop/core/swarm"
 
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/p2p/protobuf"
 	"github.com/redesblock/hop/core/p2p/streamtest"
 	"github.com/redesblock/hop/core/pingpong"
 	"github.com/redesblock/hop/core/pingpong/pb"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 func TestPing(t *testing.T) {

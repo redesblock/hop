@@ -26,10 +26,10 @@ import (
 	"github.com/redesblock/hop/core/keystore"
 	filekeystore "github.com/redesblock/hop/core/keystore/file"
 	memkeystore "github.com/redesblock/hop/core/keystore/mem"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/node"
 	"github.com/redesblock/hop/core/resolver/multiresolver"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/util/logging"
 	"github.com/spf13/cobra"
 )
 

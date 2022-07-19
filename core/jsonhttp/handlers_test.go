@@ -8,14 +8,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/redesblock/hop/core/jsonhttp"
 )
 
 func TestMethodHandler(t *testing.T) {
 	contentType := "application/swarm"
 
-	h := jsonhttp.MethodHandler{
+	h := MethodHandler{
 		"POST": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			got, err := io.ReadAll(r.Body)
 			if err != nil {
@@ -63,7 +61,7 @@ func TestMethodHandler(t *testing.T) {
 			t.Errorf("got status code %d, want %d", statusCode, wantCode)
 		}
 
-		var m *jsonhttp.StatusResponse
+		var m *StatusResponse
 
 		if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil {
 			t.Errorf("json unmarshal response body: %s", err)
@@ -85,7 +83,7 @@ func TestMethodHandler(t *testing.T) {
 func TestNotFoundHandler(t *testing.T) {
 	w := httptest.NewRecorder()
 
-	jsonhttp.NotFoundHandler(w, nil)
+	NotFoundHandler(w, nil)
 
 	statusCode := w.Result().StatusCode
 	wantCode := http.StatusNotFound
@@ -93,7 +91,7 @@ func TestNotFoundHandler(t *testing.T) {
 		t.Errorf("got status code %d, want %d", statusCode, wantCode)
 	}
 
-	var m *jsonhttp.StatusResponse
+	var m *StatusResponse
 
 	if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil {
 		t.Errorf("json unmarshal response body: %s", err)
@@ -114,16 +112,16 @@ func TestNotFoundHandler(t *testing.T) {
 func TestNewMaxBodyBytesHandler(t *testing.T) {
 	var limit int64 = 10
 
-	h := jsonhttp.NewMaxBodyBytesHandler(limit)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := NewMaxBodyBytesHandler(limit)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, err := io.ReadAll(r.Body)
 		if err != nil {
-			if jsonhttp.HandleBodyReadError(err, w) {
+			if HandleBodyReadError(err, w) {
 				return
 			}
-			jsonhttp.InternalServerError(w, nil)
+			InternalServerError(w, nil)
 			return
 		}
-		jsonhttp.OK(w, nil)
+		OK(w, nil)
 	}))
 
 	for _, tc := range []struct {
@@ -173,7 +171,7 @@ func TestNewMaxBodyBytesHandler(t *testing.T) {
 				t.Errorf("got http response code %d, want %d", w.Code, tc.wantCode)
 			}
 
-			var m *jsonhttp.StatusResponse
+			var m *StatusResponse
 
 			if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil {
 				t.Errorf("json unmarshal response body: %s", err)

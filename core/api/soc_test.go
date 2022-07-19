@@ -12,12 +12,12 @@ import (
 	"github.com/redesblock/hop/core/api"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/jsonhttp/jsonhttptest"
-	"github.com/redesblock/hop/core/logging"
 	testingsoc "github.com/redesblock/hop/core/soc/testing"
 	statestore "github.com/redesblock/hop/core/statestore/mock"
 	"github.com/redesblock/hop/core/storage/mock"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
+	"github.com/redesblock/hop/core/util/logging"
 	"github.com/redesblock/hop/core/voucher"
 	mockpost "github.com/redesblock/hop/core/voucher/mock"
 )

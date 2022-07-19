@@ -20,7 +20,6 @@ import (
 	"github.com/redesblock/hop/core/file/joiner"
 	"github.com/redesblock/hop/core/file/loadsave"
 	"github.com/redesblock/hop/core/hive"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/manifest"
 	"github.com/redesblock/hop/core/netstore"
 	"github.com/redesblock/hop/core/p2p"
@@ -41,6 +40,7 @@ import (
 	"github.com/redesblock/hop/core/topology/lightnode"
 	"github.com/redesblock/hop/core/tracing"
 	"github.com/redesblock/hop/core/transaction"
+	"github.com/redesblock/hop/core/util/logging"
 	"github.com/redesblock/hop/core/voucher"
 	"github.com/sirupsen/logrus"
 )

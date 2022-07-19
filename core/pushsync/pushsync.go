@@ -17,7 +17,6 @@ import (
 	"github.com/redesblock/hop/core/account"
 	"github.com/redesblock/hop/core/cac"
 	"github.com/redesblock/hop/core/crypto"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/p2p/protobuf"
 	"github.com/redesblock/hop/core/pricer"
@@ -28,6 +27,7 @@ import (
 	"github.com/redesblock/hop/core/tags"
 	"github.com/redesblock/hop/core/topology"
 	"github.com/redesblock/hop/core/tracing"
+	"github.com/redesblock/hop/core/util/logging"
 	"github.com/redesblock/hop/core/voucher"
 )
 

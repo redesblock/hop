@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/redesblock/hop/core/logging"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 func TestOneMigration(t *testing.T) {

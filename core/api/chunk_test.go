@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/redesblock/hop/core/logging"
 	pinning "github.com/redesblock/hop/core/pinning/mock"
 	statestore "github.com/redesblock/hop/core/statestore/mock"
+	"github.com/redesblock/hop/core/util/logging"
 	mockpost "github.com/redesblock/hop/core/voucher/mock"
 
 	"github.com/redesblock/hop/core/tags"

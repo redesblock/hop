@@ -5,8 +5,8 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/statestore/leveldb"
+	"github.com/redesblock/hop/core/util/logging"
 	"github.com/redesblock/hop/core/voucher"
 	"github.com/redesblock/hop/core/voucher/batchstore"
 	postagetest "github.com/redesblock/hop/core/voucher/testing"

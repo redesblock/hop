@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/redesblock/hop/core/logging"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 const (

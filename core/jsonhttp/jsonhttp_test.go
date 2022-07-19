@@ -8,14 +8,12 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"testing"
-
-	"github.com/redesblock/hop/core/jsonhttp"
 )
 
 func TestRespond_defaults(t *testing.T) {
 	w := httptest.NewRecorder()
 
-	jsonhttp.Respond(w, 0, nil)
+	Respond(w, 0, nil)
 
 	statusCode := w.Result().StatusCode
 	wantCode := http.StatusOK
@@ -23,7 +21,7 @@ func TestRespond_defaults(t *testing.T) {
 		t.Errorf("got status code %d, want %d", statusCode, wantCode)
 	}
 
-	var m *jsonhttp.StatusResponse
+	var m *StatusResponse
 
 	if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil {
 		t.Errorf("json unmarshal response body: %s", err)
@@ -94,14 +92,14 @@ func TestRespond_statusResponse(t *testing.T) {
 	} {
 		w := httptest.NewRecorder()
 
-		jsonhttp.Respond(w, tc.code, nil)
+		Respond(w, tc.code, nil)
 
 		statusCode := w.Result().StatusCode
 		if statusCode != tc.code {
 			t.Errorf("got status code %d, want %d", statusCode, tc.code)
 		}
 
-		var m *jsonhttp.StatusResponse
+		var m *StatusResponse
 
 		if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil {
 			t.Errorf("json unmarshal response body: %s", err)
@@ -167,14 +165,14 @@ func TestRespond_special(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
 
-			jsonhttp.Respond(w, tc.code, tc.response)
+			Respond(w, tc.code, tc.response)
 
 			statusCode := w.Result().StatusCode
 			if statusCode != tc.code {
 				t.Errorf("got status code %d, want %d", statusCode, tc.code)
 			}
 
-			var m *jsonhttp.StatusResponse
+			var m *StatusResponse
 
 			if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil {
 				t.Errorf("json unmarshal response body: %s", err)
@@ -207,7 +205,7 @@ func TestRespond_custom(t *testing.T) {
 		Field1: "custom message",
 		Field2: 42,
 	}
-	jsonhttp.Respond(w, wantCode, r)
+	Respond(w, wantCode, r)
 
 	statusCode := w.Result().StatusCode
 	if statusCode != wantCode {
@@ -232,56 +230,56 @@ func TestStandardHTTPResponds(t *testing.T) {
 		f    func(w http.ResponseWriter, response interface{})
 		code int
 	}{
-		{f: jsonhttp.Continue, code: http.StatusContinue},
-		{f: jsonhttp.SwitchingProtocols, code: http.StatusSwitchingProtocols},
-		{f: jsonhttp.OK, code: http.StatusOK},
-		{f: jsonhttp.Created, code: http.StatusCreated},
-		{f: jsonhttp.Accepted, code: http.StatusAccepted},
-		{f: jsonhttp.NonAuthoritativeInfo, code: http.StatusNonAuthoritativeInfo},
-		{f: jsonhttp.ResetContent, code: http.StatusResetContent},
-		{f: jsonhttp.PartialContent, code: http.StatusPartialContent},
-		{f: jsonhttp.MultipleChoices, code: http.StatusMultipleChoices},
-		{f: jsonhttp.MovedPermanently, code: http.StatusMovedPermanently},
-		{f: jsonhttp.Found, code: http.StatusFound},
-		{f: jsonhttp.SeeOther, code: http.StatusSeeOther},
-		{f: jsonhttp.NotModified, code: http.StatusNotModified},
-		{f: jsonhttp.UseProxy, code: http.StatusUseProxy},
-		{f: jsonhttp.TemporaryRedirect, code: http.StatusTemporaryRedirect},
-		{f: jsonhttp.PermanentRedirect, code: http.StatusPermanentRedirect},
-		{f: jsonhttp.BadRequest, code: http.StatusBadRequest},
-		{f: jsonhttp.Unauthorized, code: http.StatusUnauthorized},
-		{f: jsonhttp.PaymentRequired, code: http.StatusPaymentRequired},
-		{f: jsonhttp.Forbidden, code: http.StatusForbidden},
-		{f: jsonhttp.NotFound, code: http.StatusNotFound},
-		{f: jsonhttp.MethodNotAllowed, code: http.StatusMethodNotAllowed},
-		{f: jsonhttp.NotAcceptable, code: http.StatusNotAcceptable},
-		{f: jsonhttp.ProxyAuthRequired, code: http.StatusProxyAuthRequired},
-		{f: jsonhttp.RequestTimeout, code: http.StatusRequestTimeout},
-		{f: jsonhttp.Conflict, code: http.StatusConflict},
-		{f: jsonhttp.Gone, code: http.StatusGone},
-		{f: jsonhttp.LengthRequired, code: http.StatusLengthRequired},
-		{f: jsonhttp.PreconditionFailed, code: http.StatusPreconditionFailed},
-		{f: jsonhttp.RequestEntityTooLarge, code: http.StatusRequestEntityTooLarge},
-		{f: jsonhttp.RequestURITooLong, code: http.StatusRequestURITooLong},
-		{f: jsonhttp.UnsupportedMediaType, code: http.StatusUnsupportedMediaType},
-		{f: jsonhttp.RequestedRangeNotSatisfiable, code: http.StatusRequestedRangeNotSatisfiable},
-		{f: jsonhttp.ExpectationFailed, code: http.StatusExpectationFailed},
-		{f: jsonhttp.Teapot, code: http.StatusTeapot},
-		{f: jsonhttp.UpgradeRequired, code: http.StatusUpgradeRequired},
-		{f: jsonhttp.PreconditionRequired, code: http.StatusPreconditionRequired},
-		{f: jsonhttp.TooManyRequests, code: http.StatusTooManyRequests},
-		{f: jsonhttp.RequestHeaderFieldsTooLarge, code: http.StatusRequestHeaderFieldsTooLarge},
-		{f: jsonhttp.UnavailableForLegalReasons, code: http.StatusUnavailableForLegalReasons},
-		{f: jsonhttp.InternalServerError, code: http.StatusInternalServerError},
-		{f: jsonhttp.NotImplemented, code: http.StatusNotImplemented},
-		{f: jsonhttp.BadGateway, code: http.StatusBadGateway},
-		{f: jsonhttp.ServiceUnavailable, code: http.StatusServiceUnavailable},
-		{f: jsonhttp.GatewayTimeout, code: http.StatusGatewayTimeout},
-		{f: jsonhttp.HTTPVersionNotSupported, code: http.StatusHTTPVersionNotSupported},
+		{f: Continue, code: http.StatusContinue},
+		{f: SwitchingProtocols, code: http.StatusSwitchingProtocols},
+		{f: OK, code: http.StatusOK},
+		{f: Created, code: http.StatusCreated},
+		{f: Accepted, code: http.StatusAccepted},
+		{f: NonAuthoritativeInfo, code: http.StatusNonAuthoritativeInfo},
+		{f: ResetContent, code: http.StatusResetContent},
+		{f: PartialContent, code: http.StatusPartialContent},
+		{f: MultipleChoices, code: http.StatusMultipleChoices},
+		{f: MovedPermanently, code: http.StatusMovedPermanently},
+		{f: Found, code: http.StatusFound},
+		{f: SeeOther, code: http.StatusSeeOther},
+		{f: NotModified, code: http.StatusNotModified},
+		{f: UseProxy, code: http.StatusUseProxy},
+		{f: TemporaryRedirect, code: http.StatusTemporaryRedirect},
+		{f: PermanentRedirect, code: http.StatusPermanentRedirect},
+		{f: BadRequest, code: http.StatusBadRequest},
+		{f: Unauthorized, code: http.StatusUnauthorized},
+		{f: PaymentRequired, code: http.StatusPaymentRequired},
+		{f: Forbidden, code: http.StatusForbidden},
+		{f: NotFound, code: http.StatusNotFound},
+		{f: MethodNotAllowed, code: http.StatusMethodNotAllowed},
+		{f: NotAcceptable, code: http.StatusNotAcceptable},
+		{f: ProxyAuthRequired, code: http.StatusProxyAuthRequired},
+		{f: RequestTimeout, code: http.StatusRequestTimeout},
+		{f: Conflict, code: http.StatusConflict},
+		{f: Gone, code: http.StatusGone},
+		{f: LengthRequired, code: http.StatusLengthRequired},
+		{f: PreconditionFailed, code: http.StatusPreconditionFailed},
+		{f: RequestEntityTooLarge, code: http.StatusRequestEntityTooLarge},
+		{f: RequestURITooLong, code: http.StatusRequestURITooLong},
+		{f: UnsupportedMediaType, code: http.StatusUnsupportedMediaType},
+		{f: RequestedRangeNotSatisfiable, code: http.StatusRequestedRangeNotSatisfiable},
+		{f: ExpectationFailed, code: http.StatusExpectationFailed},
+		{f: Teapot, code: http.StatusTeapot},
+		{f: UpgradeRequired, code: http.StatusUpgradeRequired},
+		{f: PreconditionRequired, code: http.StatusPreconditionRequired},
+		{f: TooManyRequests, code: http.StatusTooManyRequests},
+		{f: RequestHeaderFieldsTooLarge, code: http.StatusRequestHeaderFieldsTooLarge},
+		{f: UnavailableForLegalReasons, code: http.StatusUnavailableForLegalReasons},
+		{f: InternalServerError, code: http.StatusInternalServerError},
+		{f: NotImplemented, code: http.StatusNotImplemented},
+		{f: BadGateway, code: http.StatusBadGateway},
+		{f: ServiceUnavailable, code: http.StatusServiceUnavailable},
+		{f: GatewayTimeout, code: http.StatusGatewayTimeout},
+		{f: HTTPVersionNotSupported, code: http.StatusHTTPVersionNotSupported},
 	} {
 		w := httptest.NewRecorder()
 		tc.f(w, nil)
-		var m *jsonhttp.StatusResponse
+		var m *StatusResponse
 
 		if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil {
 			t.Errorf("json unmarshal response body: %s", err)
@@ -309,7 +307,7 @@ func TestPanicRespond(t *testing.T) {
 		}
 	}()
 
-	jsonhttp.Respond(w, http.StatusNotFound, map[bool]string{
+	Respond(w, http.StatusNotFound, map[bool]string{
 		true: "",
 	})
 }
@@ -317,7 +315,7 @@ func TestPanicRespond(t *testing.T) {
 func testContentType(t *testing.T, r *httptest.ResponseRecorder) {
 	t.Helper()
 
-	if got := r.Header().Get("Content-Type"); got != jsonhttp.DefaultContentTypeHeader {
-		t.Errorf("got content type %q, want %q", got, jsonhttp.DefaultContentTypeHeader)
+	if got := r.Header().Get("Content-Type"); got != DefaultContentTypeHeader {
+		t.Errorf("got content type %q, want %q", got, DefaultContentTypeHeader)
 	}
 }

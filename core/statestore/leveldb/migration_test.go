@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/storage"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 func TestOneMigration(t *testing.T) {

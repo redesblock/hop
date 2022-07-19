@@ -16,7 +16,6 @@ import (
 	"github.com/redesblock/hop/core/voucher"
 
 	"github.com/redesblock/hop/core/localstore"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/pusher"
 	"github.com/redesblock/hop/core/pushsync"
 	pushsyncmock "github.com/redesblock/hop/core/pushsync/mock"
@@ -25,6 +24,7 @@ import (
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
 	"github.com/redesblock/hop/core/topology/mock"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 // no of times to retry to see if we have received response from pushsync

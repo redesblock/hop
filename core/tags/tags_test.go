@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/redesblock/hop/core/logging"
 	statestore "github.com/redesblock/hop/core/statestore/mock"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 func TestAll(t *testing.T) {

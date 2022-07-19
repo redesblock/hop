@@ -14,12 +14,12 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/redesblock/hop/core/crypto"
 	signermock "github.com/redesblock/hop/core/crypto/mock"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/sctx"
 	storemock "github.com/redesblock/hop/core/statestore/mock"
 	"github.com/redesblock/hop/core/transaction"
 	"github.com/redesblock/hop/core/transaction/backendmock"
 	"github.com/redesblock/hop/core/transaction/monitormock"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 func nonceKey(sender common.Address) string {

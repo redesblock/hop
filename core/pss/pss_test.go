@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/redesblock/hop/core/crypto"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/pss"
 	"github.com/redesblock/hop/core/pushsync"
 	pushsyncmock "github.com/redesblock/hop/core/pushsync/mock"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/util/logging"
 	"github.com/redesblock/hop/core/voucher"
 	postagetesting "github.com/redesblock/hop/core/voucher/testing"
 )

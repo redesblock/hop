@@ -15,7 +15,6 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/redesblock/hop/core/account/addressbook"
 	"github.com/redesblock/hop/core/blocker"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/pingpong"
 	"github.com/redesblock/hop/core/shed"
@@ -24,6 +23,7 @@ import (
 	im "github.com/redesblock/hop/core/topology/kademlia/internal/metrics"
 	"github.com/redesblock/hop/core/topology/kademlia/internal/waitnext"
 	"github.com/redesblock/hop/core/topology/pslice"
+	"github.com/redesblock/hop/core/util/logging"
 	"golang.org/x/sync/errgroup"
 )
 

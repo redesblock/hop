@@ -36,7 +36,6 @@ import (
 	"github.com/redesblock/hop/core/account/addressbook"
 	hopCrypto "github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/hop"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/p2p/libp2p/internal/blocklist"
 	"github.com/redesblock/hop/core/p2p/libp2p/internal/breaker"
@@ -47,6 +46,7 @@ import (
 	"github.com/redesblock/hop/core/topology"
 	"github.com/redesblock/hop/core/topology/lightnode"
 	"github.com/redesblock/hop/core/tracing"
+	"github.com/redesblock/hop/core/util/logging"
 	"go.uber.org/atomic"
 )
 

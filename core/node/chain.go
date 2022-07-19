@@ -18,7 +18,6 @@ import (
 	hopabi "github.com/redesblock/hop/contracts/abi"
 	"github.com/redesblock/hop/core/config"
 	"github.com/redesblock/hop/core/crypto"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p/libp2p"
 	"github.com/redesblock/hop/core/sctx"
 	"github.com/redesblock/hop/core/settle"
@@ -30,6 +29,7 @@ import (
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/transaction"
 	"github.com/redesblock/hop/core/transaction/wrapped"
+	"github.com/redesblock/hop/core/util/logging"
 	"github.com/redesblock/hop/core/voucher/vouchercontract"
 )
 

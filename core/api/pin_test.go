@@ -10,7 +10,6 @@ import (
 	"github.com/redesblock/hop/core/api"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/jsonhttp/jsonhttptest"
-	"github.com/redesblock/hop/core/logging"
 	pinning "github.com/redesblock/hop/core/pinning/mock"
 	statestore "github.com/redesblock/hop/core/statestore/mock"
 	"github.com/redesblock/hop/core/storage/mock"
@@ -18,6 +17,7 @@ import (
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/tags"
 	"github.com/redesblock/hop/core/traversal"
+	"github.com/redesblock/hop/core/util/logging"
 	mockpost "github.com/redesblock/hop/core/voucher/mock"
 )
 

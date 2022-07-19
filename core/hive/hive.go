@@ -22,10 +22,10 @@ import (
 	"github.com/redesblock/hop/core/account/addressbook"
 	"github.com/redesblock/hop/core/hive/pb"
 	"github.com/redesblock/hop/core/hop"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/p2p/protobuf"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/util/logging"
 	"github.com/redesblock/hop/core/util/ratelimit"
 )
 

@@ -23,7 +23,6 @@ import (
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/redesblock/hop/core/account/addressbook"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/p2p/libp2p"
 	"github.com/redesblock/hop/core/p2p/libp2p/internal/handshake"
@@ -31,6 +30,7 @@ import (
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/swarm/test"
 	"github.com/redesblock/hop/core/topology/lightnode"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 const (

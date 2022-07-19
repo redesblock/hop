@@ -10,8 +10,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/transaction"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 var (

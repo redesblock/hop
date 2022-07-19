@@ -7,10 +7,10 @@ import (
 	"path"
 	"strings"
 
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/resolver"
 	"github.com/redesblock/hop/core/resolver/client/ens"
 	"github.com/redesblock/hop/core/resolver/multiresolver/multierror"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 // Ensure MultiResolver implements Resolver interface.

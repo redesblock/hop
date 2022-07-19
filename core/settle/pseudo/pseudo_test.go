@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	mockp2p "github.com/redesblock/hop/core/p2p/mock"
 	"github.com/redesblock/hop/core/p2p/protobuf"
@@ -18,6 +17,7 @@ import (
 	"github.com/redesblock/hop/core/settle/pseudo/pb"
 	"github.com/redesblock/hop/core/statestore/mock"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 type testObserver struct {

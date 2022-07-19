@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/swarm/test"
+	"github.com/redesblock/hop/core/util/logging"
 
 	"github.com/redesblock/hop/core/blocker"
 )

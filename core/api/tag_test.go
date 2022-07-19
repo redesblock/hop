@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/redesblock/hop/core/logging"
 	statestore "github.com/redesblock/hop/core/statestore/mock"
+	"github.com/redesblock/hop/core/util/logging"
 	mockpost "github.com/redesblock/hop/core/voucher/mock"
 
 	"github.com/gorilla/websocket"

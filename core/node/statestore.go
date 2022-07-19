@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/statestore/leveldb"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 // InitStateStore will initialize the stateStore with the given path to the

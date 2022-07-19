@@ -9,8 +9,8 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/redesblock/hop/core/apikey"
 	"github.com/redesblock/hop/core/jsonhttp"
-	"github.com/redesblock/hop/core/logging/httpaccess"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/util/logging/httpaccess"
 	"github.com/sirupsen/logrus"
 	"resenje.org/web"
 )

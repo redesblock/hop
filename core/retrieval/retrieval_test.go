@@ -13,7 +13,6 @@ import (
 
 	accountingmock "github.com/redesblock/hop/core/account/mock"
 
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"
 	"github.com/redesblock/hop/core/p2p/protobuf"
 	"github.com/redesblock/hop/core/p2p/streamtest"
@@ -25,6 +24,7 @@ import (
 	testingc "github.com/redesblock/hop/core/storage/testing"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/topology"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 var (

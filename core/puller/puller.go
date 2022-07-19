@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/redesblock/hop/core/intervalstore"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/pullsync"
 	"github.com/redesblock/hop/core/storage"
 	"github.com/redesblock/hop/core/swarm"
 	"github.com/redesblock/hop/core/topology"
+	"github.com/redesblock/hop/core/util/logging"
 )
 
 var (

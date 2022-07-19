@@ -16,8 +16,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/prometheus/client_golang/prometheus"
 	hopabi "github.com/redesblock/hop/contracts/abi"
-	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/transaction"
+	"github.com/redesblock/hop/core/util/logging"
 	"github.com/redesblock/hop/core/voucher"
 	"github.com/redesblock/hop/core/voucher/batchservice"
 )
