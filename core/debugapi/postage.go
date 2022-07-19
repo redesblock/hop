@@ -11,12 +11,12 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
-	"github.com/redesblock/hop/core/bigint"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/postage"
 	"github.com/redesblock/hop/core/postage/postagecontract"
 	"github.com/redesblock/hop/core/sctx"
 	"github.com/redesblock/hop/core/storage"
+	"github.com/redesblock/hop/core/util/bigint"
 )
 
 func (s *Service) postageAccessHandler(h http.Handler) http.Handler {

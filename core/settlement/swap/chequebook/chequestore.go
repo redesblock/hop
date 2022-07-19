@@ -30,7 +30,7 @@ var (
 	ErrWrongBeneficiary = errors.New("wrong beneficiary")
 	// ErrBouncingCheque is the error returned if the chequebook is demonstrably illiquid.
 	ErrBouncingCheque = errors.New("bouncing cheque")
-	// ErrChequeValueTooLow is the error returned if the after deduction value of a cheque did not cover 1 accounting credit
+	// ErrChequeValueTooLow is the error returned if the after deduction value of a cheque did not cover 1 account credit
 	ErrChequeValueTooLow = errors.New("cheque value lower than acceptable")
 )
 

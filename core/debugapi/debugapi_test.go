@@ -14,7 +14,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/multiformats/go-multiaddr"
-	accountingmock "github.com/redesblock/hop/core/accounting/mock"
+	accountingmock "github.com/redesblock/hop/core/account/mock"
 	"github.com/redesblock/hop/core/api"
 	"github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/debugapi"

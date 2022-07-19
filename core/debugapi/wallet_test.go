@@ -7,12 +7,12 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/redesblock/hop/core/bigint"
 	"github.com/redesblock/hop/core/debugapi"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/jsonhttp/jsonhttptest"
 	erc20mock "github.com/redesblock/hop/core/settlement/swap/erc20/mock"
 	"github.com/redesblock/hop/core/transaction/backendmock"
+	"github.com/redesblock/hop/core/util/bigint"
 )
 
 func TestWallet(t *testing.T) {

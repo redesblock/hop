@@ -15,7 +15,7 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/redesblock/hop/core/shed"
 
-	"github.com/redesblock/hop/core/addressbook"
+	"github.com/redesblock/hop/core/account/addressbook"
 	hopCrypto "github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/discovery/mock"
 	"github.com/redesblock/hop/core/hop"

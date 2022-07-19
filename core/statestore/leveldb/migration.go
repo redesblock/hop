@@ -299,7 +299,7 @@ func deleteKeys(s *Store, keys []string) error {
 func (s *Store) Nuke() error {
 	var (
 		keys     []string
-		prefixes = []string{"accounting", "pseudosettle", "swap", "non-mineable-overlay"}
+		prefixes = []string{"account", "pseudosettle", "swap", "non-mineable-overlay"}
 		err      error
 	)
 	keys, err = collectKeysExcept(s, prefixes)

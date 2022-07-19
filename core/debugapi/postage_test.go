@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/redesblock/hop/core/bigint"
 	"github.com/redesblock/hop/core/debugapi"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/jsonhttp/jsonhttptest"
@@ -23,6 +22,7 @@ import (
 	postagetesting "github.com/redesblock/hop/core/postage/testing"
 	"github.com/redesblock/hop/core/sctx"
 	"github.com/redesblock/hop/core/transaction/backendmock"
+	"github.com/redesblock/hop/core/util/bigint"
 )
 
 func TestPostageCreateStamp(t *testing.T) {

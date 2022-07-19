@@ -7,12 +7,12 @@ import (
 	"strconv"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/redesblock/hop/core/bigint"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/postage/postagecontract"
 	"github.com/redesblock/hop/core/sctx"
 	"github.com/redesblock/hop/core/settlement/swap"
 	"github.com/redesblock/hop/core/settlement/swap/chequebook"
+	"github.com/redesblock/hop/core/util/bigint"
 
 	"github.com/gorilla/mux"
 	"github.com/redesblock/hop/core/swarm"

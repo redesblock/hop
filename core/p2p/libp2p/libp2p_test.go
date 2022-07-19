@@ -11,7 +11,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/multiformats/go-multiaddr"
-	"github.com/redesblock/hop/core/addressbook"
+	"github.com/redesblock/hop/core/account/addressbook"
 	"github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/logging"
 	"github.com/redesblock/hop/core/p2p"

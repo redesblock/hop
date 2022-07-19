@@ -4,8 +4,8 @@ import (
 	"net/http"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/redesblock/hop/core/bigint"
 	"github.com/redesblock/hop/core/jsonhttp"
+	"github.com/redesblock/hop/core/util/bigint"
 )
 
 type walletResponse struct {

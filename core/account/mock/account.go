@@ -1,12 +1,12 @@
 // Package mock provides a mock implementation for the
-// accounting interface.
+// account interface.
 package mock
 
 import (
 	"math/big"
 	"sync"
 
-	"github.com/redesblock/hop/core/accounting"
+	"github.com/redesblock/hop/core/account"
 	"github.com/redesblock/hop/core/swarm"
 )
 
@@ -14,8 +14,8 @@ import (
 type Service struct {
 	lock                    sync.Mutex
 	balances                map[string]*big.Int
-	prepareDebitFunc        func(peer swarm.Address, price uint64) (accounting.Action, error)
-	prepareCreditFunc       func(peer swarm.Address, price uint64, originated bool) (accounting.Action, error)
+	prepareDebitFunc        func(peer swarm.Address, price uint64) (account.Action, error)
+	prepareCreditFunc       func(peer swarm.Address, price uint64, originated bool) (account.Action, error)
 	balanceFunc             func(swarm.Address) (*big.Int, error)
 	shadowBalanceFunc       func(swarm.Address) (*big.Int, error)
 	balancesFunc            func() (map[string]*big.Int, error)
@@ -40,14 +40,14 @@ type creditAction struct {
 }
 
 // WithDebitFunc sets the mock Debit function
-func WithPrepareDebitFunc(f func(peer swarm.Address, price uint64) (accounting.Action, error)) Option {
+func WithPrepareDebitFunc(f func(peer swarm.Address, price uint64) (account.Action, error)) Option {
 	return optionFunc(func(s *Service) {
 		s.prepareDebitFunc = f
 	})
 }
 
 // WithDebitFunc sets the mock Debit function
-func WithPrepareCreditFunc(f func(peer swarm.Address, price uint64, originated bool) (accounting.Action, error)) Option {
+func WithPrepareCreditFunc(f func(peer swarm.Address, price uint64, originated bool) (account.Action, error)) Option {
 	return optionFunc(func(s *Service) {
 		s.prepareCreditFunc = f
 	})
@@ -88,7 +88,7 @@ func WithBalanceSurplusFunc(f func(swarm.Address) (*big.Int, error)) Option {
 	})
 }
 
-// NewAccounting creates the mock accounting implementation
+// NewAccounting creates the mock account implementation
 func NewAccounting(opts ...Option) *Service {
 	mock := new(Service)
 	mock.balances = make(map[string]*big.Int)
@@ -98,7 +98,7 @@ func NewAccounting(opts ...Option) *Service {
 	return mock
 }
 
-func (s *Service) MakeCreditAction(peer swarm.Address, price uint64) accounting.Action {
+func (s *Service) MakeCreditAction(peer swarm.Address, price uint64) account.Action {
 	return &creditAction{
 		accounting: s,
 		price:      new(big.Int).SetUint64(price),
@@ -108,7 +108,7 @@ func (s *Service) MakeCreditAction(peer swarm.Address, price uint64) accounting.
 }
 
 // Debit is the mock function wrapper that calls the set implementation
-func (s *Service) PrepareDebit(peer swarm.Address, price uint64) (accounting.Action, error) {
+func (s *Service) PrepareDebit(peer swarm.Address, price uint64) (account.Action, error) {
 	if s.prepareDebitFunc != nil {
 		return s.prepareDebitFunc(peer, price)
 	}
@@ -122,7 +122,7 @@ func (s *Service) PrepareDebit(peer swarm.Address, price uint64) (accounting.Act
 	}, nil
 }
 
-func (s *Service) PrepareCredit(peer swarm.Address, price uint64, originated bool) (accounting.Action, error) {
+func (s *Service) PrepareCredit(peer swarm.Address, price uint64, originated bool) (account.Action, error) {
 	if s.prepareCreditFunc != nil {
 		return s.prepareCreditFunc(peer, price, originated)
 	}
@@ -231,7 +231,7 @@ func (s *Service) SurplusBalance(peer swarm.Address) (*big.Int, error) {
 	return big.NewInt(0), nil
 }
 
-// Option is the option passed to the mock accounting service
+// Option is the option passed to the mock account service
 type Option interface {
 	apply(*Service)
 }

@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/redesblock/hop/core/bigint"
 	"github.com/redesblock/hop/core/debugapi"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/jsonhttp/jsonhttptest"
@@ -17,6 +16,7 @@ import (
 	"github.com/redesblock/hop/core/settlement/swap/chequebook"
 	"github.com/redesblock/hop/core/settlement/swap/chequebook/mock"
 	swapmock "github.com/redesblock/hop/core/settlement/swap/mock"
+	"github.com/redesblock/hop/core/util/bigint"
 
 	"github.com/redesblock/hop/core/swarm"
 )

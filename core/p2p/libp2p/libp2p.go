@@ -33,7 +33,7 @@ import (
 	ws "github.com/libp2p/go-ws-transport"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-multistream"
-	"github.com/redesblock/hop/core/addressbook"
+	"github.com/redesblock/hop/core/account/addressbook"
 	hopCrypto "github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/hop"
 	"github.com/redesblock/hop/core/logging"

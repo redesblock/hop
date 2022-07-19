@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/redesblock/hop/core/accounting"
-	accountingmock "github.com/redesblock/hop/core/accounting/mock"
+	"github.com/redesblock/hop/core/account"
+	accountingmock "github.com/redesblock/hop/core/account/mock"
 	"github.com/redesblock/hop/core/crypto"
 	cryptomock "github.com/redesblock/hop/core/crypto/mock"
 	"github.com/redesblock/hop/core/logging"
@@ -461,7 +461,7 @@ func TestPushChunkToClosestErrorAttemptRetry(t *testing.T) {
 
 	var pivotAccounting *accountingmock.Service
 	pivotAccounting = accountingmock.NewAccounting(
-		accountingmock.WithPrepareCreditFunc(func(peer swarm.Address, price uint64, originated bool) (accounting.Action, error) {
+		accountingmock.WithPrepareCreditFunc(func(peer swarm.Address, price uint64, originated bool) (account.Action, error) {
 			if peer.String() == peer4.String() {
 				return pivotAccounting.MakeCreditAction(peer, price), nil
 			}
@@ -533,7 +533,7 @@ func TestPushChunkToClosestErrorAttemptRetry(t *testing.T) {
 
 	for _, p := range []struct {
 		addr swarm.Address
-		acct accounting.Interface
+		acct account.Interface
 	}{
 		{peer1, peerAccounting1},
 		{peer2, peerAccounting2},
@@ -795,14 +795,14 @@ func TestPushChunkToClosestSkipError(t *testing.T) {
 	}
 }
 
-func createPushSyncNode(t *testing.T, addr swarm.Address, prices pricerParameters, recorder *streamtest.Recorder, unwrap func(swarm.Chunk), signer crypto.Signer, mockOpts ...mock.Option) (*pushsync.PushSync, *mocks.MockStorer, *tags.Tags, accounting.Interface) {
+func createPushSyncNode(t *testing.T, addr swarm.Address, prices pricerParameters, recorder *streamtest.Recorder, unwrap func(swarm.Chunk), signer crypto.Signer, mockOpts ...mock.Option) (*pushsync.PushSync, *mocks.MockStorer, *tags.Tags, account.Interface) {
 	t.Helper()
 	mockAccounting := accountingmock.NewAccounting()
 	ps, mstorer, ts := createPushSyncNodeWithAccounting(t, addr, prices, recorder, unwrap, signer, mockAccounting, mockOpts...)
 	return ps, mstorer, ts, mockAccounting
 }
 
-func createPushSyncNodeWithAccounting(t *testing.T, addr swarm.Address, prices pricerParameters, recorder *streamtest.Recorder, unwrap func(swarm.Chunk), signer crypto.Signer, acct accounting.Interface, mockOpts ...mock.Option) (*pushsync.PushSync, *mocks.MockStorer, *tags.Tags) {
+func createPushSyncNodeWithAccounting(t *testing.T, addr swarm.Address, prices pricerParameters, recorder *streamtest.Recorder, unwrap func(swarm.Chunk), signer crypto.Signer, acct account.Interface, mockOpts ...mock.Option) (*pushsync.PushSync, *mocks.MockStorer, *tags.Tags) {
 	t.Helper()
 	logger := logging.New(io.Discard, 0)
 	storer := mocks.NewStorer()

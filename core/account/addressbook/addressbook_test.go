@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/redesblock/hop/core/addressbook"
+	"github.com/redesblock/hop/core/account/addressbook"
 	"github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/hop"
 	"github.com/redesblock/hop/core/statestore/mock"

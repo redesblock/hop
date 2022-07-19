@@ -5,7 +5,7 @@ import "./Ownable.sol";
 
 /**
  * @title PriceOracle contract
- * @dev The price oracle contract keeps track of the current prices for settlement in swap accounting.
+ * @dev The price oracle contract keeps track of the current prices for settlement in swap account.
  */
 contract PriceOracle is Ownable {
     /**
@@ -17,7 +17,7 @@ contract PriceOracle is Ownable {
      */
     event ChequeValueDeductionUpdate(uint256 chequeValueDeduction);
 
-    // current price in PLUR per accounting unit
+    // current price in PLUR per account unit
     uint256 public price;
     // value deducted from first received cheque from a peer in PLUR
     uint256 public chequeValueDeduction;
@@ -28,7 +28,7 @@ contract PriceOracle is Ownable {
     }
 
     /**
-     * @notice Returns the current price in PLUR per accounting unit and the current cheque value deduction amount.
+     * @notice Returns the current price in PLUR per account unit and the current cheque value deduction amount.
      */
     function getPrice() external view returns (uint256, uint256) {
         return (price, chequeValueDeduction);

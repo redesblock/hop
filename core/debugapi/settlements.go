@@ -6,11 +6,11 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"github.com/redesblock/hop/core/bigint"
 	"github.com/redesblock/hop/core/jsonhttp"
 	"github.com/redesblock/hop/core/postage/postagecontract"
 	"github.com/redesblock/hop/core/settlement"
 	"github.com/redesblock/hop/core/swarm"
+	"github.com/redesblock/hop/core/util/bigint"
 )
 
 var (

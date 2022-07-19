@@ -19,7 +19,7 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
-	"github.com/redesblock/hop/core/addressbook"
+	"github.com/redesblock/hop/core/account/addressbook"
 	"github.com/redesblock/hop/core/hive/pb"
 	"github.com/redesblock/hop/core/hop"
 	"github.com/redesblock/hop/core/logging"

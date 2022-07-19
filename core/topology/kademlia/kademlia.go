@@ -13,7 +13,7 @@ import (
 	"time"
 
 	ma "github.com/multiformats/go-multiaddr"
-	"github.com/redesblock/hop/core/addressbook"
+	"github.com/redesblock/hop/core/account/addressbook"
 	"github.com/redesblock/hop/core/blocker"
 	"github.com/redesblock/hop/core/discovery"
 	"github.com/redesblock/hop/core/logging"

@@ -15,7 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	ma "github.com/multiformats/go-multiaddr"
 
-	ab "github.com/redesblock/hop/core/addressbook"
+	ab "github.com/redesblock/hop/core/account/addressbook"
 	"github.com/redesblock/hop/core/crypto"
 	"github.com/redesblock/hop/core/hive"
 	"github.com/redesblock/hop/core/hive/pb"

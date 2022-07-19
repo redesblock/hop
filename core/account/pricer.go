@@ -1,4 +1,4 @@
-package accounting
+package account
 
 import (
 	"github.com/redesblock/hop/core/swarm"

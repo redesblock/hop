@@ -1,6 +1,6 @@
-// Package accounting provides functionalities needed
-// to do per-peer accounting.
-package accounting
+// Package account provides functionalities needed
+// to do per-peer account.
+package account
 
 import (
 	"context"
@@ -34,7 +34,7 @@ var (
 type Interface interface {
 	// Credit action to prevent overspending in case of concurrent requests.
 	PrepareCredit(peer swarm.Address, price uint64, originated bool) (Action, error)
-	// PrepareDebit returns an accounting Action for the later debit to be executed on and to implement shadowing a possibly credited part of reserve on the other side.
+	// PrepareDebit returns an account Action for the later debit to be executed on and to implement shadowing a possibly credited part of reserve on the other side.
 	PrepareDebit(peer swarm.Address, price uint64) (Action, error)
 	// Balance returns the current balance for the given peer.
 	Balance(peer swarm.Address) (*big.Int, error)
@@ -48,7 +48,7 @@ type Interface interface {
 	CompensatedBalances() (map[string]*big.Int, error)
 }
 
-// Action represents an accounting action that can be applied
+// Action represents an account action that can be applied
 type Action interface {
 	// Cleanup cleans up an action. Must be called whether it was applied or not.
 	Cleanup()
@@ -81,9 +81,9 @@ type PayFunc func(context.Context, swarm.Address, *big.Int)
 // RefreshFunc is the function used for sync time-based settlement
 type RefreshFunc func(context.Context, swarm.Address, *big.Int, *big.Int) (*big.Int, int64, error)
 
-// accountingPeer holds all in-memory accounting information for one peer.
+// accountingPeer holds all in-memory account information for one peer.
 type accountingPeer struct {
-	lock                           sync.Mutex // lock to be held during any accounting action for this peer
+	lock                           sync.Mutex // lock to be held during any account action for this peer
 	reservedBalance                *big.Int   // amount currently reserved for active peer interaction
 	shadowReservedBalance          *big.Int   // amount potentially to be debited for active peer interaction
 	ghostBalance                   *big.Int   // amount potentially could have been debited for but was not
@@ -95,7 +95,7 @@ type accountingPeer struct {
 	connected                      bool
 }
 
-// Accounting is the main implementation of the accounting interface.
+// Accounting is the main implementation of the account interface.
 type Accounting struct {
 	// Mutex for accessing the accountingPeers map.
 	accountingPeersMu sync.Mutex
@@ -754,14 +754,14 @@ func (a *Accounting) NotifyPaymentSent(peer swarm.Address, amount *big.Int, rece
 
 	if receivedError != nil {
 		accountingPeer.lastSettlementFailureTimestamp = a.timeNow().Unix()
-		a.logger.Warningf("accounting: payment failure %v", receivedError)
+		a.logger.Warningf("account: payment failure %v", receivedError)
 		return
 	}
 
 	currentBalance, err := a.Balance(peer)
 	if err != nil {
 		if !errors.Is(err, ErrPeerNoBalance) {
-			a.logger.Errorf("accounting: notifypaymentsent failed to load balance: %v", err)
+			a.logger.Errorf("account: notifypaymentsent failed to load balance: %v", err)
 			return
 		}
 	}
@@ -773,18 +773,18 @@ func (a *Accounting) NotifyPaymentSent(peer swarm.Address, amount *big.Int, rece
 
 	err = a.store.Put(peerBalanceKey(peer), nextBalance)
 	if err != nil {
-		a.logger.Errorf("accounting: notifypaymentsent failed to persist balance: %v", err)
+		a.logger.Errorf("account: notifypaymentsent failed to persist balance: %v", err)
 		return
 	}
 
 	err = a.decreaseOriginatedBalanceBy(peer, amount)
 	if err != nil {
-		a.logger.Warningf("accounting: notifypaymentsent failed to decrease originated balance: %v", err)
+		a.logger.Warningf("account: notifypaymentsent failed to decrease originated balance: %v", err)
 	}
 
 }
 
-// NotifyPaymentThreshold should be called to notify accounting of changes in the payment threshold
+// NotifyPaymentThreshold should be called to notify account of changes in the payment threshold
 func (a *Accounting) NotifyPaymentThreshold(peer swarm.Address, paymentThreshold *big.Int) error {
 	accountingPeer := a.getAccountingPeer(peer)
 
